@@ -1,0 +1,25 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for Launch Deck",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "sql:default",
+    "sql:allow-execute",
+    "sql:allow-select",
+    "dialog:default",
+    "dialog:allow-open",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
+    "updater:default",
+    "process:allow-restart",
+    "deep-link:default",
+    "opener:allow-open-url"
+  ]
+}

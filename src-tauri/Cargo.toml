@@ -1,0 +1,35 @@
+[package]
+name = "launch-deck"
+version = "0.1.0"
+description = "A premium futuristic game launcher"
+authors = ["Launch Deck"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+reqwest = { version = "0.13.2", features = ["json", "gzip", "brotli", "deflate", "zstd"] }
+sha2 = "0.10"
+dotenv = "0.15.0"
+tokio = { version = "1", features = ["net", "time", "io-util", "sync"] }
+urlencoding = "2"
+pelite = "0.10.0"
+winreg = "0.56.0"
+base64 = "0.22"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

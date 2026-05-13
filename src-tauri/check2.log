@@ -1,0 +1,214 @@
+    Checking launch-deck v0.1.0 (C:\Users\ohirs\OneDrive\Documents\Visual Studio Projects\launch-deck\src-tauri)
+error[E0433]: failed to resolve: use of undeclared type `Arc`
+    --> src\main.rs:2081:30
+     |
+2081 |     let seen_signin        = Arc::new(AtomicBool::new(false));
+     |                              ^^^ use of undeclared type `Arc`
+     |
+help: consider importing this struct
+     |
+   6 + use std::sync::Arc;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `AtomicBool`
+    --> src\main.rs:2081:39
+     |
+2081 |     let seen_signin        = Arc::new(AtomicBool::new(false));
+     |                                       ^^^^^^^^^^ use of undeclared type `AtomicBool`
+     |
+help: consider importing this struct
+     |
+   6 + use std::sync::atomic::AtomicBool;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Arc`
+    --> src\main.rs:2082:30
+     |
+2082 |     let redirect_done      = Arc::new(AtomicBool::new(false));
+     |                              ^^^ use of undeclared type `Arc`
+     |
+help: consider importing this struct
+     |
+   6 + use std::sync::Arc;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `AtomicBool`
+    --> src\main.rs:2082:39
+     |
+2082 |     let redirect_done      = Arc::new(AtomicBool::new(false));
+     |                                       ^^^^^^^^^^ use of undeclared type `AtomicBool`
+     |
+help: consider importing this struct
+     |
+   6 + use std::sync::atomic::AtomicBool;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Arc`
+    --> src\main.rs:2083:30
+     |
+2083 |     let extraction_started = Arc::new(AtomicBool::new(false));
+     |                              ^^^ use of undeclared type `Arc`
+     |
+help: consider importing this struct
+     |
+   6 + use std::sync::Arc;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `AtomicBool`
+    --> src\main.rs:2083:39
+     |
+2083 |     let extraction_started = Arc::new(AtomicBool::new(false));
+     |                                       ^^^^^^^^^^ use of undeclared type `AtomicBool`
+     |
+help: consider importing this struct
+     |
+   6 + use std::sync::atomic::AtomicBool;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2111:57
+     |
+2111 |                         extraction_started.store(false, Ordering::SeqCst);
+     |                                                         ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2136:45
+     |
+2136 |                     seen_signin.store(true, Ordering::SeqCst);
+     |                                             ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2137:48
+     |
+2137 |                     redirect_done.store(false, Ordering::SeqCst);
+     |                                                ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2138:53
+     |
+2138 |                     extraction_started.store(false, Ordering::SeqCst);
+     |                                                     ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2146:37
+     |
+2146 |                 if seen_signin.load(Ordering::SeqCst)
+     |                                     ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2147:68
+     |
+2147 |                     && redirect_done.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+     |                                                                    ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2147:86
+     |
+2147 |                     && redirect_done.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+     |                                                                                      ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2164:37
+     |
+2164 |                 if seen_signin.load(Ordering::SeqCst)
+     |                                     ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2165:73
+     |
+2165 |                     && extraction_started.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+     |                                                                         ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `Ordering`
+    --> src\main.rs:2165:91
+     |
+2165 |                     && extraction_started.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+     |                                                                                           ^^^^^^^^ use of undeclared type `Ordering`
+     |
+help: consider importing one of these enums
+     |
+   6 + use std::cmp::Ordering;
+     |
+   6 + use std::sync::atomic::Ordering;
+     |
+
+warning: unused import: `pelite::resources::version_info::VersionInfo`
+ --> src\scanner.rs:6:5
+  |
+6 | use pelite::resources::version_info::VersionInfo;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `fetch_game_data`
+  --> src\scanner.rs:12:13
+   |
+12 | use crate::{fetch_game_data, GameData};
+   |             ^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0433`.
+warning: `launch-deck` (bin "launch-deck") generated 2 warnings
+error: could not compile `launch-deck` (bin "launch-deck") due to 16 previous errors; 2 warnings emitted

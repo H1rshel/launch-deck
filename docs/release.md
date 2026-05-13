@@ -1,0 +1,261 @@
+# Launch Deck — Release & Distribution Guide
+
+## Distribution artifacts
+
+Each release ships three Windows artifacts:
+
+| File | Use |
+|---|---|
+| `LaunchDeck-Setup-x64.exe` | **Recommended.** NSIS per-user installer. Works without admin rights. Supports Tauri auto-updates. |
+| `LaunchDeck-x64.msi` | MSI for enterprise / managed deployments (Group Policy, SCCM, Intune). |
+| `LaunchDeck-Portable-x64.zip` | No-install portable build. Run from any folder. Updates are manual. |
+
+In addition, the updater manifest `latest.json` and `.sig` signature files are uploaded alongside the installers so that installed builds can auto-update.
+
+---
+
+## Versioning
+
+The canonical version lives in **two places** and must always match:
+
+- `package.json` → `"version"`
+- `src-tauri/tauri.conf.json` → `"version"`
+
+`src-tauri/Cargo.toml` also carries a `version` field; keep it in sync.
+
+### Bumping a version
+
+```bash
+# Edit package.json, tauri.conf.json, and Cargo.toml to the new version, then:
+git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+git commit -m "chore: bump version to 1.0.1"
+git tag v1.0.1
+git push origin main
+git push origin v1.0.1
+```
+
+Pushing the tag triggers the GitHub Actions release workflow.
+
+---
+
+## Build commands
+
+Two build commands exist so that signing is never required for normal local work:
+
+| Command | Purpose | Requires signing keys? |
+|---|---|---|
+| `npm run tauri:build` | Local installer build — NSIS + MSI, no `.sig` files | No |
+| `npm run tauri:build:release` | Production release — NSIS + MSI + `.sig` files + `latest.json` | Yes |
+
+`tauri:build:release` merges `src-tauri/tauri.release.conf.json` on top of the
+base config, which adds `bundle.createUpdaterArtifacts` and `plugins.updater.pubkey`.
+Without that merge, Tauri never looks for a signing key.
+
+The GitHub Actions release workflow uses `tauri:build:release` automatically.
+
+---
+
+## Updater signing keys
+
+Launch Deck uses Tauri's built-in updater signing. Each update artifact (NSIS zip, MSI zip) must be signed with a private key; the matching public key lives in `src-tauri/tauri.release.conf.json`.
+
+### One-time key generation
+
+```bash
+npm run tauri -- signer generate -w ~/.tauri/launch-deck.key
+```
+
+This creates:
+- `~/.tauri/launch-deck.key` — **private key** (never commit this)
+- `~/.tauri/launch-deck.key.pub` — public key (safe to share)
+
+### Where the keys go
+
+| Key | Where |
+|---|---|
+| **Public key** | `src-tauri/tauri.release.conf.json` → `plugins.updater.pubkey` (replace `REPLACE_WITH_YOUR_PUBLIC_KEY`) |
+| **Private key** | GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY` (base64-encoded content of the `.key` file) |
+| **Key password** | GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (leave blank if you chose no password) |
+
+> **The private key must NEVER be committed to the repository.**
+> Anyone who obtains the private key can publish malicious updates that
+> installed copies of Launch Deck will trust and install automatically.
+
+### Encoding the private key for GitHub Actions
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME\.tauri\launch-deck.key")) | clip
+# Paste into the TAURI_SIGNING_PRIVATE_KEY secret in GitHub
+```
+
+---
+
+## Building locally
+
+Install dependencies (first time only):
+```bash
+npm install
+```
+
+**Local build** — NSIS + MSI installers, no signing required:
+```bash
+npm run tauri:build
+```
+
+**Production release build** — NSIS + MSI + `.sig` files + `latest.json`, requires signing keys:
+```bash
+# Set your private key first (PowerShell):
+$env:TAURI_SIGNING_PRIVATE_KEY = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME\.tauri\launch-deck.key"))
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""   # blank if no password
+
+npm run tauri:build:release
+```
+
+Artifacts land in:
+```
+src-tauri/target/release/bundle/nsis/LaunchDeck-Setup-x64.exe
+src-tauri/target/release/bundle/msi/LaunchDeck-x64.msi
+```
+
+Build the portable zip (after either build command):
+```powershell
+.\scripts\package-portable.ps1 -SkipBuild
+```
+
+---
+
+## Release process
+
+1. Bump the version in `package.json`, `tauri.conf.json`, and `Cargo.toml`.
+2. Commit and push.
+3. Tag the release:
+   ```bash
+   git tag v1.0.1
+   git push origin v1.0.1
+   ```
+4. GitHub Actions (`.github/workflows/release.yml`) runs automatically:
+   - Builds NSIS and MSI installers
+   - Signs artifacts with `TAURI_SIGNING_PRIVATE_KEY`
+   - Runs `scripts/package-portable.ps1`
+   - Creates a GitHub Release draft
+   - Uploads all artifacts
+
+5. Review the draft release, fill in release notes, and publish.
+
+---
+
+## Expected release artifacts
+
+```
+LaunchDeck-Setup-x64.exe          ← NSIS installer
+LaunchDeck-Setup-x64.exe.sig      ← updater signature
+LaunchDeck-x64.msi                ← MSI installer
+LaunchDeck-x64.msi.sig            ← updater signature
+LaunchDeck-Portable-x64.zip       ← portable build
+latest.json                       ← updater manifest
+```
+
+The `latest.json` format (generated by Tauri):
+```json
+{
+  "version": "1.0.1",
+  "notes": "Bug fixes and performance improvements.",
+  "pub_date": "2025-01-01T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "<base64 sig>",
+      "url": "https://github.com/OWNER/REPO/releases/download/v1.0.1/LaunchDeck-Setup-x64.exe.zip"
+    }
+  }
+}
+```
+
+> Replace `OWNER/REPO` with your actual GitHub repository in:
+> - `src-tauri/tauri.conf.json` → `plugins.updater.endpoints`
+> - `.github/workflows/release.yml`
+
+---
+
+## Update endpoint
+
+The updater checks this URL on startup (configurable in Settings):
+
+```
+https://github.com/OWNER/REPO/releases/latest/download/latest.json
+```
+
+Replace `OWNER/REPO` with the real repository path before shipping.
+
+---
+
+## Testing auto-updates end-to-end
+
+1. Build and install version **0.1.0** using `LaunchDeck-Setup-x64.exe`.
+2. Bump the version to **0.1.1**, tag, and push to trigger the CI build.
+3. Publish the v0.1.1 GitHub Release (ensure `latest.json` is attached).
+4. Open the installed v0.1.0 app.
+5. Go to **Settings → Updates** and click **Check for updates**.
+6. Confirm "Launch Deck 0.1.1 is available" appears.
+7. Click **Update now** and verify the progress bar appears.
+8. After download, click **Restart now**.
+9. Confirm the app relaunches as v0.1.1.
+10. Repeat with **updateMode** set to **auto_download** — verify the banner
+    appears automatically without opening Settings.
+11. Launch the portable zip and confirm it does NOT attempt an in-place install.
+
+---
+
+## Portable build notes
+
+- The portable `.exe` shares the same AppData folder (`%APPDATA%\com.launchdeck.app\`) as the installed version.
+- The portable build will detect updates and show a notification, but clicking "Update" opens the releases page rather than performing an in-place install.
+- TODO: Support a `portable.flag` file beside the executable so the app uses a local `portable-data/` subfolder instead of AppData. This would make the portable build fully self-contained.
+
+---
+
+## Google OAuth — required Supabase configuration
+
+The installed app uses a custom URL scheme (`launchdeck://`) for OAuth callbacks instead of localhost. You must register this scheme in the Supabase dashboard before the Google sign-in flow will work in production.
+
+### Steps
+
+1. Go to your Supabase project → **Authentication → URL Configuration**.
+2. Under **Redirect URLs**, add **both** of the following:
+   ```
+   http://localhost:5174/auth/callback
+   launchdeck://auth/callback
+   ```
+3. **Google Cloud Console** — no changes needed. The only authorized redirect URI that Google needs is:
+   ```
+   https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback
+   ```
+   (Supabase acts as the intermediary; it then forwards to your `redirectTo`. You do NOT add `launchdeck://` to Google Cloud.)
+
+### How it works
+
+| Mode | redirectTo | Browser opened |
+|---|---|---|
+| `npm run tauri dev` (dev) | `http://localhost:5174/auth/callback` | WebView navigates to /auth/callback route which exchanges the code |
+| Installed app (production) | `launchdeck://auth/callback` | System browser opens via `openUrl()`, deep link returns code to running app |
+
+In production the app:
+1. Calls `signInWithOAuth({ skipBrowserRedirect: true })` to get the Google URL without navigating the WebView
+2. Opens the URL in the system browser with `@tauri-apps/plugin-opener`
+3. After Google auth, Supabase redirects the browser to `launchdeck://auth/callback?code=XXX`
+4. Windows routes the custom scheme to the running Launch Deck app
+5. `onOpenUrl` fires and `supabase.auth.exchangeCodeForSession(code)` completes the sign-in
+6. `onAuthStateChange` fires `SIGNED_IN` — the app navigates to dashboard
+
+In dev mode the app:
+1. Calls `signInWithOAuth()` (no `skipBrowserRedirect`) — Supabase navigates the WebView
+2. Browser is redirected to `http://localhost:5174/auth/callback?code=XXX`
+3. The `/auth/callback` React route exchanges the code and navigates to dashboard
+
+---
+
+## GitHub Actions secrets required
+
+| Secret | Value |
+|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY` | Base64-encoded contents of `~/.tauri/launch-deck.key` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password chosen during key generation (blank if none) |
