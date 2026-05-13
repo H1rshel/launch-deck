@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest]
+        platform: [windows-2022]
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -31,6 +31,10 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
 
       - name: Validate updater signing key
         shell: pwsh
