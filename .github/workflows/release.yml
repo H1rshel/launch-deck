@@ -89,3 +89,4 @@ jobs:
           releaseBody: "See the assets below to download this version and install."
           releaseDraft: false
           prerelease: false
+          args: --ci
