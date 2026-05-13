@@ -36,19 +36,53 @@ jobs:
         shell: pwsh
         env:
           UPDATER_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+          UPDATER_SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_PRIVATE_KEY_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:UPDATER_SIGNING_KEY)) {
+          $key = $env:UPDATER_SIGNING_KEY
+          if ([string]::IsNullOrWhiteSpace($key)) {
             Write-Error "Missing updater signing key. Add a repository secret named TAURI_SIGNING_PRIVATE_KEY, or TAURI_PRIVATE_KEY for backwards compatibility."
           }
+
+          function Test-DecodedKeyText([string]$value) {
+            return $value -match "untrusted comment:" -and $value -match "secret key"
+          }
+
+          function Test-KeyFileText([string]$value) {
+            try {
+              $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($value.Trim()))
+              return Test-DecodedKeyText $decoded
+            } catch {
+              return $false
+            }
+          }
+
+          $keyFileText = $key.Trim()
+          if (-not (Test-KeyFileText $keyFileText)) {
+            try {
+              $decodedOnce = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($key.Trim()))
+              if (Test-KeyFileText $decodedOnce) {
+                $keyFileText = $decodedOnce.Trim()
+              } elseif (Test-DecodedKeyText $key) {
+                $keyFileText = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($key))
+              }
+            } catch {
+              if (Test-DecodedKeyText $key) {
+                $keyFileText = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($key))
+              }
+            }
+          }
+
+          $keyPath = Join-Path $env:RUNNER_TEMP "launch-deck-updater.key"
+          [IO.File]::WriteAllText($keyPath, $keyFileText, [Text.UTF8Encoding]::new($false))
+          "TAURI_SIGNING_PRIVATE_KEY=$keyPath" >> $env:GITHUB_ENV
+          "TAURI_PRIVATE_KEY=$keyPath" >> $env:GITHUB_ENV
+          "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$($env:UPDATER_SIGNING_KEY_PASSWORD)" >> $env:GITHUB_ENV
+          "TAURI_PRIVATE_KEY_PASSWORD=$($env:UPDATER_SIGNING_KEY_PASSWORD)" >> $env:GITHUB_ENV
 
       - name: Build and Publish Tauri App
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_PRIVATE_KEY_PASSWORD }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
-          TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Launch Deck ${{ github.ref_name }}"
