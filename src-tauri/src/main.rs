@@ -13,6 +13,19 @@ use tauri::Emitter;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
 
+const APP_USER_AGENT: &str = concat!(
+    "LaunchDeck/",
+    env!("CARGO_PKG_VERSION"),
+    " (https://github.com/H1rshel/launch-deck)"
+);
+
+fn app_http_client() -> Client {
+    Client::builder()
+        .user_agent(APP_USER_AGENT)
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
 fn get_env(key: &str) -> Result<String, String> {
     if let Ok(val) = std::env::var(key) {
         return Ok(val);
@@ -6178,7 +6191,7 @@ struct CheapSharkDeal {
 
 #[tauri::command]
 async fn fetch_cheapshark_deals(game_title: String) -> Result<Vec<CheapSharkDeal>, String> {
-    let client = Client::new();
+    let client = app_http_client();
     let encoded = urlencoding::encode(&game_title);
     let url = format!(
         "https://www.cheapshark.com/api/1.0/deals?title={}&upperPrice=100&pageSize=12&sortBy=Price",
@@ -6274,7 +6287,7 @@ async fn fetch_itad_deals(game_title: String) -> Result<ItadResult, String> {
     let api_key = get_env("ITAD_API_KEY")
         .map_err(|_| "ITAD_API_KEY not found in .env".to_string())?;
 
-    let client = Client::new();
+    let client = app_http_client();
 
     // Step 1: Search for the game to get its ITAD game ID
     let encoded_title = urlencoding::encode(&game_title);
