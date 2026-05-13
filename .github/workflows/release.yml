@@ -84,13 +84,17 @@ jobs:
           "TAURI_PRIVATE_KEY_PASSWORD=$($env:UPDATER_SIGNING_KEY_PASSWORD)" >> $env:GITHUB_ENV
 
       - name: Build and Publish Tauri App
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tauriScript: npm run tauri
           tagName: ${{ github.ref_name }}
           releaseName: "Launch Deck ${{ github.ref_name }}"
           releaseBody: "See the assets below to download this version and install."
           releaseDraft: false
           prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          retryAttempts: 2
           args: --ci --bundles nsis
