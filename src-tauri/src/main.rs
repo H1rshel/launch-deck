@@ -27,17 +27,31 @@ fn app_http_client() -> Client {
 }
 
 fn get_env(key: &str) -> Result<String, String> {
+    dotenv().ok();
+
     if let Ok(val) = std::env::var(key) {
         return Ok(val);
     }
-    let env_content = include_str!("../../.env");
-    for line in env_content.lines() {
-        if let Some((k, v)) = line.split_once('=') {
-            if k.trim() == key {
-                return Ok(v.trim().to_string());
-            }
+
+    let compiled = match key {
+        "IGDB_CLIENT_ID" => option_env!("IGDB_CLIENT_ID"),
+        "IGDB_CLIENT_SECRET" => option_env!("IGDB_CLIENT_SECRET"),
+        "ITAD_API_KEY" => option_env!("ITAD_API_KEY"),
+        "STEAM_API_KEY" => option_env!("STEAM_API_KEY"),
+        "VITE_GAMES_DB_API_KEY" => option_env!("VITE_GAMES_DB_API_KEY"),
+        "VITE_RAWG_API_KEY" => option_env!("VITE_RAWG_API_KEY"),
+        "VITE_SGD_API_KEY" => option_env!("VITE_SGD_API_KEY"),
+        "VITE_SUPABASE_ANON_KEY" => option_env!("VITE_SUPABASE_ANON_KEY"),
+        "VITE_SUPABASE_URL" => option_env!("VITE_SUPABASE_URL"),
+        _ => None,
+    };
+
+    if let Some(val) = compiled {
+        if !val.trim().is_empty() {
+            return Ok(val.trim().to_string());
         }
     }
+
     Err(format!("{} not found", key))
 }
 

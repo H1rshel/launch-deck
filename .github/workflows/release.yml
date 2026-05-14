@@ -87,6 +87,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IGDB_CLIENT_ID: ${{ secrets.IGDB_CLIENT_ID }}
+          IGDB_CLIENT_SECRET: ${{ secrets.IGDB_CLIENT_SECRET }}
+          ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
+          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+          VITE_GAMES_DB_API_KEY: ${{ secrets.VITE_GAMES_DB_API_KEY }}
+          VITE_RAWG_API_KEY: ${{ secrets.VITE_RAWG_API_KEY }}
+          VITE_SGD_API_KEY: ${{ secrets.VITE_SGD_API_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
         with:
           tauriScript: npm run tauri
           tagName: ${{ github.ref_name }}
