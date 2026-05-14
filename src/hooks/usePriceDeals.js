@@ -63,9 +63,22 @@ async function fetchCheapSharkDealsForTitle(gameTitle) {
 function normalizeTitleForCompare(value) {
   return String(value || '')
     .toLowerCase()
+    .normalize('NFKD')
+    .replace(/['’`]/g, '')
     .replace(/(?:deluxe|ultimate|complete|upgrade|dlc|season pass|bundle|edition)/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
+}
+
+function tokenSimilarity(left, right) {
+  const leftTokens = new Set(normalizeTitleForCompare(left).split(' ').filter(Boolean))
+  const rightTokens = new Set(normalizeTitleForCompare(right).split(' ').filter(Boolean))
+  if (!leftTokens.size || !rightTokens.size) return 0
+  let overlap = 0
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) overlap += 1
+  }
+  return overlap / Math.max(leftTokens.size, rightTokens.size)
 }
 
 /**
@@ -98,7 +111,14 @@ export function usePriceDeals(gameTitle) {
         const wantedTitle = normalizeTitleForCompare(gameTitle)
         for (const d of raw || []) {
           const dealTitle = normalizeTitleForCompare(d.title)
-          if (wantedTitle && dealTitle && !dealTitle.includes(wantedTitle) && !wantedTitle.includes(dealTitle)) {
+          const similarEnough = tokenSimilarity(gameTitle, d.title) >= 0.72
+          if (
+            wantedTitle &&
+            dealTitle &&
+            !dealTitle.includes(wantedTitle) &&
+            !wantedTitle.includes(dealTitle) &&
+            !similarEnough
+          ) {
             continue
           }
           const storeId = d.storeId || d.storeID

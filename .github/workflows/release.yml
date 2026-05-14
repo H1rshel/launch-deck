@@ -113,6 +113,34 @@ jobs:
           "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$($env:UPDATER_SIGNING_KEY_PASSWORD)" >> $env:GITHUB_ENV
           "TAURI_PRIVATE_KEY_PASSWORD=$($env:UPDATER_SIGNING_KEY_PASSWORD)" >> $env:GITHUB_ENV
 
+      - name: Validate bundled service secrets
+        shell: pwsh
+        env:
+          IGDB_CLIENT_ID: ${{ secrets.IGDB_CLIENT_ID }}
+          IGDB_CLIENT_SECRET: ${{ secrets.IGDB_CLIENT_SECRET }}
+          ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
+          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+          VITE_RAWG_API_KEY: ${{ secrets.VITE_RAWG_API_KEY }}
+          VITE_SGD_API_KEY: ${{ secrets.VITE_SGD_API_KEY }}
+        run: |
+          $required = @(
+            "IGDB_CLIENT_ID",
+            "IGDB_CLIENT_SECRET",
+            "ITAD_API_KEY",
+            "STEAM_API_KEY",
+            "VITE_RAWG_API_KEY",
+            "VITE_SGD_API_KEY"
+          )
+          $missing = @()
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              $missing += $name
+            }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing repository secret(s): $($missing -join ', '). These are bundled into the desktop app at build time."
+          }
+
       - name: Build and Publish Tauri App
         uses: tauri-apps/tauri-action@v0.6.2
         env:

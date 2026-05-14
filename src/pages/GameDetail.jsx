@@ -151,6 +151,13 @@ function getPrimaryAccountProvider(game) {
   return null
 }
 
+function buildAssetWebSearchQuery(query, activeTab) {
+  const trimmed = query.trim()
+  if (activeTab === "cover") return `${trimmed} game cover art`
+  if (activeTab === "logo") return `${trimmed} game logo transparent png`
+  return `${trimmed} game wallpaper key art`
+}
+
 function toIsoFromUnixSeconds(value) {
   if (!value || value < 1) return ""
   const date = new Date(value * 1000)
@@ -296,9 +303,29 @@ function ImagePicker({ game, onApply, onClose }) {
     setLoading(true)
     setSearchError(null)
     let assets = []
+    let fallbackError = null
+
+    const loadWebAssets = async () => {
+      const webResults = await searchWebImages(buildAssetWebSearchQuery(query, activeTab))
+      const mapped = webResults.map((r) => ({
+        name: r.source || "Web Image",
+        url: r.url,
+        width: r.width,
+        height: r.height,
+      }))
+
+      const newRes = {}
+      webResults.forEach((r) => {
+        if (r.width > 0 && r.height > 0) {
+          newRes[r.url] = `${r.width}\u00d7${r.height}`
+        }
+      })
+      setResolutions((prev) => ({ ...prev, ...newRes }))
+      return mapped
+    }
     try {
       if (source === "web") {
-        const webResults = await searchWebImages(query.trim())
+        const webResults = await searchWebImages(buildAssetWebSearchQuery(query, activeTab))
         assets = webResults.map((r) => ({
           name: r.source,
           url: r.url,
@@ -342,10 +369,20 @@ function ImagePicker({ game, onApply, onClose }) {
         assets = await searchSteamGridAssets(query.trim(), type)
       }
     } catch (err) {
-      setSearchError(
-        typeof err === "string" ? err : err?.message || "Search failed",
-      )
+      fallbackError = typeof err === "string" ? err : err?.message || "Search failed"
     }
+
+    if (source !== "web" && assets.length === 0) {
+      const fallbackAssets = await loadWebAssets()
+      if (fallbackAssets.length > 0) {
+        assets = fallbackAssets
+      } else if (fallbackError) {
+        setSearchError(fallbackError)
+      }
+    } else if (fallbackError) {
+      setSearchError(fallbackError)
+    }
+
     setResults(assets)
     setLoading(false)
   }, [query, source, activeTab])

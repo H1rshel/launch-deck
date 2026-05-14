@@ -3902,7 +3902,13 @@ async fn execute_ubisoft_graphql(
     match fetch_ubisoft_graphql(&session.access_token, &session.session_id, active_account, query, variables.clone()).await {
         Ok(payload) => Ok(payload),
         Err(e) => {
-            if e.contains("INVALID_TICKET") || e.to_lowercase().contains("invalid authorization header") || e.to_lowercase().contains("unauthorized") {
+            let lower_error = e.to_lowercase();
+            if e.contains("INVALID_TICKET")
+                || lower_error.contains("invalid authorization header")
+                || lower_error.contains("unauthorized")
+                || lower_error.contains("valid authenticated security ticket")
+                || lower_error.contains("key group")
+            {
                 eprintln!("[UBI] Token expired (INVALID_TICKET) during graphQL fetch. Attempting forced silent refresh...");
                 
                 let cache_key = build_ubisoft_session_cache_key(active_account);
