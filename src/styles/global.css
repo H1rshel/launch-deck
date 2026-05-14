@@ -223,6 +223,84 @@ h6 {
   animation: spin 1s linear infinite;
 }
 
+/* ===== Startup Recovery ===== */
+.startup-recovery {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.startup-recovery__panel {
+  width: min(460px, 100%);
+  padding: 28px;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: var(--radius-md);
+  background: rgba(17, 24, 39, 0.92);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.startup-recovery__logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  margin-bottom: 18px;
+}
+
+.startup-recovery h1 {
+  margin: 0 0 10px;
+  font-family: var(--font-heading);
+  font-size: 1.15rem;
+  line-height: 1.35;
+}
+
+.startup-recovery p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.startup-recovery pre {
+  max-height: 120px;
+  overflow: auto;
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  border-radius: var(--radius-sm);
+  background: rgba(244, 63, 94, 0.06);
+  color: #fb7185;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.75rem;
+}
+
+.startup-recovery__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.startup-recovery__actions button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(0, 212, 255, 0.24);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 212, 255, 0.08);
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.startup-recovery__actions button:hover {
+  background: rgba(0, 212, 255, 0.14);
+}
+
 /* ===== Login Page ===== */
 .login-page {
   display: flex;

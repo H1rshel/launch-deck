@@ -6799,7 +6799,35 @@ async fn fetch_image_base64(url: String) -> Result<String, String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
+#[cfg(target_os = "windows")]
+fn configure_webview2_startup() {
+    const EXTRA_ARGS_ENV: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+    const REQUIRED_ARGS: &[&str] = &[
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+    ];
+
+    let existing = std::env::var(EXTRA_ARGS_ENV).unwrap_or_default();
+    let mut args = existing
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
+    for required in REQUIRED_ARGS {
+        if !args.iter().any(|arg| arg == required) {
+            args.push((*required).to_string());
+        }
+    }
+
+    std::env::set_var(EXTRA_ARGS_ENV, args.join(" "));
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_webview2_startup() {}
+
 fn main() {
+    configure_webview2_startup();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
