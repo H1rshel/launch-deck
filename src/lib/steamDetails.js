@@ -9,14 +9,21 @@ const isTauri =
   typeof window !== 'undefined' &&
   !!(window.__TAURI_INTERNALS__ || window.__TAURI__)
 
-export async function fetchSteamPlaytime(game, steamId) {
+function readSteamApiKey() {
+  try {
+    return localStorage.getItem('steamApiKey') || ''
+  } catch {
+    return ''
+  }
+}
+
+export async function fetchSteamPlaytime(game, steamId, steamApiKey = readSteamApiKey()) {
   if (!game || !steamId || !isTauri) {
     return normalizeSteamPlaytimePayload(null)
   }
 
   const variants = generateSearchVariants(game.displayTitle, game.title)
   const appId = Number.parseInt(game.steam_app_id, 10) || null
-  const steamApiKey = localStorage.getItem('steamApiKey') || ''
 
   for (const variant of variants) {
     try {
@@ -38,7 +45,7 @@ export async function fetchSteamPlaytime(game, steamId) {
   }
 }
 
-export async function fetchSteamAchievements(game, steamId) {
+export async function fetchSteamAchievements(game, steamId, steamApiKey = readSteamApiKey()) {
   if (!game || !isTauri) {
     return normalizeAchievementsPayload(null)
   }
@@ -54,8 +61,6 @@ export async function fetchSteamAchievements(game, steamId) {
 
   const variants = generateSearchVariants(game.displayTitle, game.title)
   const appId = Number.parseInt(game.steam_app_id, 10) || null
-  const steamApiKey = localStorage.getItem('steamApiKey') || ''
-
   for (const variant of variants) {
     try {
       const result = await invoke('get_steam_achievements', {

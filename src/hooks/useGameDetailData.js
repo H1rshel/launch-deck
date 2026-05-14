@@ -68,6 +68,30 @@ function isSuccessfulAvailablePayload(payload) {
   return payload.available !== false
 }
 
+function readSteamApiKey() {
+  try {
+    return localStorage.getItem('steamApiKey') || ''
+  } catch {
+    return ''
+  }
+}
+
+function useSteamApiKey() {
+  const [steamApiKey, setSteamApiKey] = useState(() => readSteamApiKey())
+
+  useEffect(() => {
+    const sync = () => setSteamApiKey(readSteamApiKey())
+    window.addEventListener('storage', sync)
+    window.addEventListener('steam-api-key-updated', sync)
+    return () => {
+      window.removeEventListener('storage', sync)
+      window.removeEventListener('steam-api-key-updated', sync)
+    }
+  }, [])
+
+  return steamApiKey
+}
+
 function useCachedGameDetailResource({
   game,
   provider,
@@ -396,9 +420,16 @@ export function useGameMetadata(game) {
 
 export function useSteamPlaytime(game, steamId, options = {}) {
   const { revalidateOnMount = false } = options
-  const cacheKey = useMemo(() => buildSteamCacheKey(game, steamId), [game, steamId])
+  const steamApiKey = useSteamApiKey()
+  const cacheKey = useMemo(
+    () => `${buildSteamCacheKey(game, steamId)}|key:${steamApiKey ? 'set' : 'missing'}`,
+    [game, steamId, steamApiKey],
+  )
 
-  const fetcher = useCallback(() => fetchSteamPlaytime(game, steamId), [game, steamId])
+  const fetcher = useCallback(
+    () => fetchSteamPlaytime(game, steamId, steamApiKey),
+    [game, steamId, steamApiKey],
+  )
 
   return useCachedGameDetailResource({
     game,
@@ -414,12 +445,16 @@ export function useSteamPlaytime(game, steamId, options = {}) {
 }
 
 export function useSteamAchievements(game, steamId, options = {}) {
-  const cacheKey = useMemo(() => buildSteamCacheKey(game, steamId), [game, steamId])
+  const steamApiKey = useSteamApiKey()
+  const cacheKey = useMemo(
+    () => `${buildSteamCacheKey(game, steamId)}|key:${steamApiKey ? 'set' : 'missing'}`,
+    [game, steamId, steamApiKey],
+  )
   const { revalidateOnMount = false } = options
 
   const fetcher = useCallback(
-    () => fetchSteamAchievements(game, steamId),
-    [game, steamId],
+    () => fetchSteamAchievements(game, steamId, steamApiKey),
+    [game, steamId, steamApiKey],
   )
 
   return useCachedGameDetailResource({

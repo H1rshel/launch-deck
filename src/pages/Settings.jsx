@@ -167,6 +167,7 @@ function ApiKeysSection() {
       } else {
         localStorage.removeItem("steamApiKey")
       }
+      window.dispatchEvent(new CustomEvent("steam-api-key-updated"))
       setSaved(true)
       window.setTimeout(() => setSaved(false), 1200)
     } catch {}
@@ -327,6 +328,7 @@ function SteamPlatformRow() {
   const [connecting, setConnecting] = useState(false)
   const [justConnected, setJustConnected] = useState(false)
   const [error, setError] = useState(null)
+  const [steamKeyVersion, setSteamKeyVersion] = useState(0)
   const cancelRef = useState(() => ({ current: false }))[0]
 
   useEffect(() => {
@@ -336,11 +338,20 @@ function SteamPlatformRow() {
   }, [justConnected])
 
   useEffect(() => {
+    const refresh = () => setSteamKeyVersion((version) => version + 1)
+    window.addEventListener("steam-api-key-updated", refresh)
+    return () => window.removeEventListener("steam-api-key-updated", refresh)
+  }, [])
+
+  useEffect(() => {
     if (!profile?.steamId) return
     if (profile.personaName && profile.avatarUrl) return
 
     let cancelled = false
-    invoke("get_steam_profile", { steamId: profile.steamId })
+    invoke("get_steam_profile", {
+      steamId: profile.steamId,
+      steamApiKey: localStorage.getItem("steamApiKey") || "",
+    })
       .then((result) => {
         if (cancelled || !result) return
 
@@ -360,7 +371,7 @@ function SteamPlatformRow() {
     return () => {
       cancelled = true
     }
-  }, [profile?.steamId, profile?.personaName, profile?.avatarUrl])
+  }, [profile?.steamId, profile?.personaName, profile?.avatarUrl, steamKeyVersion])
 
   async function handleConnect() {
     cancelRef.current = false

@@ -6,7 +6,7 @@ export const SETTING_DEFAULTS = {
   startupMode: 'normal',
   launchAtStartup: false,
   startMinimized: false,
-  animationsEnabled: false,
+  animationsEnabled: true,
   compactMode: false,
   accentColor: 'cyan',
   defaultSort: 'name',
@@ -52,6 +52,14 @@ function applyEffects(settings) {
 }
 
 function loadAll() {
+  try {
+    const migrationKey = `${PREFIX}restoreAnimations_0_1_21`
+    if (localStorage.getItem(migrationKey) !== 'true') {
+      localStorage.setItem(PREFIX + 'animationsEnabled', JSON.stringify(true))
+      localStorage.setItem(migrationKey, 'true')
+    }
+  } catch {}
+
   const out = {}
   for (const key of Object.keys(SETTING_DEFAULTS)) {
     out[key] = readSetting(key)

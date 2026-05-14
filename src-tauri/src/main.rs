@@ -838,8 +838,19 @@ async fn fetch_steam_profile(
 }
 
 #[tauri::command]
-async fn get_steam_profile(steam_id: String) -> Result<SteamConnectResult, String> {
-    let steam_key = get_env("STEAM_API_KEY").unwrap_or_default();
+async fn get_steam_profile(
+    steam_id: String,
+    steam_api_key: Option<String>,
+) -> Result<SteamConnectResult, String> {
+    let steam_key = steam_api_key
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let steam_key = if steam_key.is_empty() {
+        get_env("STEAM_API_KEY").unwrap_or_default()
+    } else {
+        steam_key
+    };
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .user_agent(APP_USER_AGENT)
