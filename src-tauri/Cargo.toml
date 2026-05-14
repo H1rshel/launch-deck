@@ -1,6 +1,6 @@
 [package]
 name = "launch-deck"
-version = "0.1.12"
+version = "0.1.13"
 description = "A premium futuristic game launcher"
 authors = ["Launch Deck"]
 edition = "2021"

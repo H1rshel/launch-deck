@@ -19263,12 +19263,17 @@ h6 {
   align-items: center;
   gap: 6px;
   font-size: 0.8125rem;
-  margin-top: 10px;
+  margin: 14px 22px 0;
   color: var(--text-muted);
+  line-height: 1.45;
 }
 .settings__update-status--ok {
   color: #22c55e;
 }
 .settings__update-status--error {
   color: #f43f5e;
+  padding: 10px 12px;
+  border: 1px solid rgba(244, 63, 94, 0.18);
+  border-radius: var(--radius-sm);
+  background: rgba(244, 63, 94, 0.05);
 }

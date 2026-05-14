@@ -133,7 +133,64 @@ jobs:
           releaseBody: "See the assets below to download this version and install."
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
+          uploadUpdaterJson: false
           updaterJsonPreferNsis: true
           retryAttempts: 2
           args: --ci --bundles nsis
+
+      - name: Publish compatible updater manifest
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+            "User-Agent" = "launch-deck-release"
+          }
+          $repo = "${{ github.repository }}"
+          $tag = "${{ github.ref_name }}"
+          $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"
+
+          $setupAsset = $release.assets |
+            Where-Object { $_.name -like "*setup.exe" } |
+            Sort-Object created_at -Descending |
+            Select-Object -First 1
+          if (-not $setupAsset) {
+            Write-Error "Could not find the uploaded NSIS setup asset on release $tag."
+          }
+
+          $sigPath = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*setup.exe.sig" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $sigPath) {
+            Write-Error "Could not find the generated updater signature."
+          }
+
+          $manifest = [ordered]@{
+            version = $tag.TrimStart("v")
+            notes = "See the assets below to download this version and install."
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            url = $setupAsset.browser_download_url
+            signature = (Get-Content -Raw -LiteralPath $sigPath.FullName).Trim()
+          }
+
+          $manifestPath = Join-Path $env:RUNNER_TEMP "latest.json"
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
+
+          $existingManifest = $release.assets | Where-Object { $_.name -eq "latest.json" } | Select-Object -First 1
+          if ($existingManifest) {
+            Invoke-RestMethod -Method Delete -Headers $headers -Uri $existingManifest.url | Out-Null
+          }
+
+          $uploadHeaders = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+            "Content-Type" = "application/json"
+            "User-Agent" = "launch-deck-release"
+          }
+          $uploadUrl = "https://uploads.github.com/repos/$repo/releases/$($release.id)/assets?name=latest.json"
+          Invoke-RestMethod -Method Post -Headers $uploadHeaders -Uri $uploadUrl -InFile $manifestPath | Out-Null
