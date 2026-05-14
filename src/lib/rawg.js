@@ -174,6 +174,28 @@ export async function fetchRawgDetails(id) {
   return null
 }
 
+export async function fetchRawgMediaByTitle(title) {
+  try {
+    const results = await searchGame(title)
+    const match = bestMatch(results, title)
+    if (!match?.id) return null
+
+    const screenshotsRes = await fetch(`${BASE_URL}/games/${match.id}/screenshots?key=${API_KEY}`)
+    const screenshotsData = screenshotsRes.ok ? await screenshotsRes.json() : null
+    const screenshots = (screenshotsData?.results || [])
+      .map((shot) => shot.image)
+      .filter(Boolean)
+
+    return {
+      screenshots,
+      artworks: match.background_image ? [match.background_image] : [],
+    }
+  } catch (err) {
+    console.error(`RAWG media fetch failed for "${title}":`, err)
+    return null
+  }
+}
+
 /**
  * Quick RAWG search for scan modal previews.
  * Returns { cover_url, name } for the best match, or null.

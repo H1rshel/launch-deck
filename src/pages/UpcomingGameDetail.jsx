@@ -15,7 +15,11 @@ import {
 } from "lucide-react";
 import TopBar from "../components/layout/TopBar";
 import { useUpcomingGame } from "../hooks/useUpcomingGame";
-import { useUpcomingGameExtended } from "../hooks/useUpcomingGameExtended";
+import {
+  normalizeUpcomingImages,
+  normalizeUpcomingVideos,
+  useUpcomingGameExtended,
+} from "../hooks/useUpcomingGameExtended";
 import { useCountdown } from "../hooks/useCountdown";
 import { useLibraryProfile } from "../hooks/useLibraryProfile";
 import { useAuth } from "../hooks/useAuth";
@@ -40,6 +44,32 @@ function asArray(v) {
     }
   }
   return [];
+}
+
+function firstPresent(...values) {
+  return values.find((value) => value != null && value !== "") ?? null;
+}
+
+function mergeImages(...values) {
+  return normalizeUpcomingImages(values.flatMap((value) => asArray(value)));
+}
+
+function mergeVideos(...values) {
+  return normalizeUpcomingVideos(values.flatMap((value) => asArray(value)));
+}
+
+function formatListValue(values) {
+  const list = asArray(values)
+    .map((value) => {
+      if (!value) return "";
+      if (typeof value === "string") return value;
+      if (value.name) return value.name;
+      if (value.rating && value.organization) return `${value.organization} ${value.rating}`;
+      if (value.rating) return String(value.rating);
+      return "";
+    })
+    .filter(Boolean);
+  return list.length ? list.join(", ") : "";
 }
 
 function formatReleaseDate(dateStr, precision) {
@@ -391,17 +421,63 @@ export default function UpcomingGameDetail() {
   const reasons = matchReasons(game, profile, 4);
   const descSummary = summary || ext?.summary || "";
   const storyline = ext?.storyline || "";
-  const screenshots = ext?.screenshots || [];
-  const artworks = ext?.artworks || [];
-  const videos = ext?.videos || [];
-  const websites = ext?.websites || [];
+  const screenshots = mergeImages(
+    ext?.screenshots,
+    game.screenshots,
+    game.screenshot_urls,
+    searchResult?.screenshots,
+    searchResult?.screenshot_urls,
+  );
+  const artworks = mergeImages(
+    ext?.artworks,
+    game.artworks,
+    game.artwork_urls,
+    searchResult?.artworks,
+    searchResult?.artwork_urls,
+    game.banner_url,
+    searchResult?.banner_url,
+  );
+  const videos = mergeVideos(ext?.videos, game.videos, searchResult?.videos);
+  const websites = asArray(ext?.websites).length
+    ? asArray(ext.websites)
+    : asArray(game.websites ?? searchResult?.websites);
+  const ageRatings = asArray(ext?.age_ratings ?? game.age_ratings ?? searchResult?.age_ratings);
+  const gameModes = asArray(ext?.game_modes ?? game.game_modes ?? searchResult?.game_modes);
+  const playerPerspectives = asArray(
+    ext?.player_perspectives ?? game.player_perspectives ?? searchResult?.player_perspectives,
+  );
+  const gameEngines = asArray(ext?.game_engines ?? game.game_engines ?? searchResult?.game_engines);
 
   // Ratings — from IGDB extended data (0-100 scale, null when unavailable)
-  const igdbRating = ext?.rating ?? null;
-  const igdbAggRating = ext?.aggregated_rating ?? null;
-  const igdbTotalRating = ext?.total_rating ?? null;
-  const igdbRatingCount = ext?.rating_count ?? null;
-  const igdbAggRatingCount = ext?.aggregated_rating_count ?? null;
+  const igdbRating = firstPresent(ext?.rating, game.rating, searchResult?.rating);
+  const igdbAggRating = firstPresent(
+    ext?.aggregated_rating,
+    game.aggregated_rating,
+    game.aggregatedRating,
+    searchResult?.aggregated_rating,
+    searchResult?.aggregatedRating,
+  );
+  const igdbTotalRating = firstPresent(
+    ext?.total_rating,
+    game.total_rating,
+    game.totalRating,
+    searchResult?.total_rating,
+    searchResult?.totalRating,
+  );
+  const igdbRatingCount = firstPresent(
+    ext?.rating_count,
+    game.rating_count,
+    game.ratingCount,
+    searchResult?.rating_count,
+    searchResult?.ratingCount,
+  );
+  const igdbAggRatingCount = firstPresent(
+    ext?.aggregated_rating_count,
+    game.aggregated_rating_count,
+    game.aggregatedRatingCount,
+    searchResult?.aggregated_rating_count,
+    searchResult?.aggregatedRatingCount,
+  );
 
   const allTags = [
     ...genres.map((g) => ({ label: g, type: "genre" })),
@@ -633,6 +709,26 @@ export default function UpcomingGameDetail() {
                   icon={Layers}
                   label="Platforms"
                   value={platforms.join(", ") || "—"}
+                />
+                <Fact
+                  icon={Tag}
+                  label="Modes"
+                  value={formatListValue(gameModes)}
+                />
+                <Fact
+                  icon={Users}
+                  label="Perspective"
+                  value={formatListValue(playerPerspectives)}
+                />
+                <Fact
+                  icon={Code2}
+                  label="Engine"
+                  value={formatListValue(gameEngines)}
+                />
+                <Fact
+                  icon={Star}
+                  label="Age rating"
+                  value={formatListValue(ageRatings)}
                 />
                 {game.franchise_name && (
                   <Fact
