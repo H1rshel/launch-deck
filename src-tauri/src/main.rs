@@ -1383,7 +1383,7 @@ async fn get_steam_achievements(
     };
     if steam_key.trim().is_empty() {
         return Ok(unavailable(
-            "Steam API key not configured. Add a Steam Web API key in Settings",
+            "Steam achievements are not configured for this build",
         ));
     }
     if steam_id.trim().is_empty() {
