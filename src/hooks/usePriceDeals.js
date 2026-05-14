@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { cheapSharkRedirectUrl, filterAccurateDeals } from '../lib/dealMatching'
 
 // ── CheapShark store ID → store name mapping ───────────────────────────────
 const STORE_NAMES = {
@@ -108,19 +109,7 @@ export function usePriceDeals(gameTitle) {
 
         // Deduplicate by store (keep cheapest per store)
         const byStore = new Map()
-        const wantedTitle = normalizeTitleForCompare(gameTitle)
-        for (const d of raw || []) {
-          const dealTitle = normalizeTitleForCompare(d.title)
-          const similarEnough = tokenSimilarity(gameTitle, d.title) >= 0.72
-          if (
-            wantedTitle &&
-            dealTitle &&
-            !dealTitle.includes(wantedTitle) &&
-            !wantedTitle.includes(dealTitle) &&
-            !similarEnough
-          ) {
-            continue
-          }
+        for (const d of filterAccurateDeals(gameTitle, raw || [])) {
           const storeId = d.storeId || d.storeID
           const dealId = d.dealId || d.dealID
           const salePrice = d.salePrice || d.sale_price
@@ -133,7 +122,8 @@ export function usePriceDeals(gameTitle) {
               normalPrice,
               savings: parseFloat(d.savings || '0'),
               dealId,
-              redirectUrl: `https://www.cheapshark.com/redirect?dealID=${encodeURIComponent(dealId)}`,
+              title: d.title,
+              redirectUrl: cheapSharkRedirectUrl(dealId),
             })
           }
         }

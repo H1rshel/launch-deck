@@ -2,8 +2,9 @@ import { useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { supabase } from '../lib/supabase'
 import { useNotifications } from '../context/NotificationContext'
+import { filterAccurateDeals } from '../lib/dealMatching'
 
-export const PRICE_SNAPSHOT_KEY = 'launchdeck_price_snapshot'
+export const PRICE_SNAPSHOT_KEY = 'launchdeck_price_snapshot_v2'
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const MIN_SAVINGS_PCT = 15 // notify if >=15% off
 const STARTUP_DELAY_MS = 8000 // let app settle before hitting APIs
@@ -92,8 +93,9 @@ export function usePriceWatcher(user) {
               continue
             }
 
+            const accurateDeals = filterAccurateDeals(game.name, raw)
             let bestDeal = null
-            for (const d of raw) {
+            for (const d of accurateDeals) {
               const savingsPct = parseFloat(d.savings || '0')
               if (savingsPct >= MIN_SAVINGS_PCT) {
                 if (!bestDeal || parseFloat(d.salePrice) < parseFloat(bestDeal.salePrice)) {

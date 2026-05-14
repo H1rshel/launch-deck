@@ -2,6 +2,7 @@ import { ExternalLink, Loader, ShoppingCart, TrendingDown, AlertCircle } from 'l
 import { useItadDeals } from '../../hooks/useItadDeals'
 import { usePriceDeals } from '../../hooks/usePriceDeals'
 import { invoke } from '@tauri-apps/api/core'
+import { openUrl } from '@tauri-apps/plugin-opener'
 
 // ── IGDB website category → store metadata ────────────────────────────────────
 const STORE_MAP = {
@@ -54,8 +55,17 @@ function GogIcon() {
 
 const STORE_ICONS = { steam: SteamIcon, epic: EpicIcon, gog: GogIcon }
 
-function openExternal(url) {
-  try { invoke('open_url', { url }) } catch { window.open(url, '_blank', 'noopener') }
+async function openExternal(url) {
+  if (!url) return
+  try {
+    await openUrl(url)
+  } catch {
+    try {
+      await invoke('open_url', { url })
+    } catch {
+      window.open(url, '_blank', 'noopener')
+    }
+  }
 }
 
 // ── Normalize ITAD deal to display shape ─────────────────────────────────────
@@ -102,7 +112,7 @@ function DealRow({ deal, isBest }) {
     <button
       type="button"
       className={`ugd-deals__row ${isBest ? 'ugd-deals__row--best' : ''}`}
-      onClick={() => openExternal(deal.url)}
+      onClick={() => { void openExternal(deal.url) }}
       title={`Buy on ${deal.store}`}
     >
       <span className="ugd-deals__cell ugd-deals__cell--store">
@@ -218,7 +228,7 @@ export default function GameStoreLinks({ websites, gameName }) {
               <button
                 type="button"
                 className="ugd-deals__more-link"
-                onClick={() => openExternal(itadGameUrl)}
+                onClick={() => { void openExternal(itadGameUrl) }}
               >
                 More on IsThereAnyDeal
                 <ExternalLink size={11} />
@@ -228,7 +238,7 @@ export default function GameStoreLinks({ websites, gameName }) {
               <button
                 type="button"
                 className="ugd-deals__more-link"
-                onClick={() => openExternal(aksUrl)}
+                onClick={() => { void openExternal(aksUrl) }}
               >
                 AllKeyShop
                 <ExternalLink size={11} />
@@ -250,7 +260,7 @@ export default function GameStoreLinks({ websites, gameName }) {
               <button
                 type="button"
                 className="ugd-deals__more-link"
-                onClick={() => openExternal(itadUrl)}
+                onClick={() => { void openExternal(itadUrl) }}
               >
                 Search IsThereAnyDeal
                 <ExternalLink size={11} />
@@ -260,7 +270,7 @@ export default function GameStoreLinks({ websites, gameName }) {
               <button
                 type="button"
                 className="ugd-deals__more-link"
-                onClick={() => openExternal(aksUrl)}
+                onClick={() => { void openExternal(aksUrl) }}
               >
                 Search AllKeyShop
                 <ExternalLink size={11} />
@@ -282,7 +292,7 @@ export default function GameStoreLinks({ websites, gameName }) {
                   key={s.key}
                   type="button"
                   className={`ugd-stores__btn ugd-stores__btn--${s.key}`}
-                  onClick={() => openExternal(s.url)}
+                  onClick={() => { void openExternal(s.url) }}
                   title={`Open on ${s.name}`}
                 >
                   {Icon ? <Icon /> : <ExternalLink size={13} />}
@@ -304,7 +314,7 @@ export default function GameStoreLinks({ websites, gameName }) {
                 key={c.key}
                 type="button"
                 className="ugd-stores__link"
-                onClick={() => openExternal(c.url)}
+                onClick={() => { void openExternal(c.url) }}
                 title={c.name}
               >
                 <ExternalLink size={11} />

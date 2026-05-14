@@ -1733,10 +1733,21 @@ async fn wait_for_processes(process_names: Vec<String>, timeout_ms: Option<u64>)
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd.exe")
-        .args(["/c", "start", "", &url])
+    {
+        let escaped = url.replace('\'', "''");
+        let mut cmd = std::process::Command::new("powershell.exe");
+        cmd.creation_flags(0x08000000);
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &format!("Start-Process '{}'", escaped),
+        ])
         .spawn()
         .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
 
     #[cfg(target_os = "macos")]
     std::process::Command::new("open")
