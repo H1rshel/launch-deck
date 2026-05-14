@@ -80,10 +80,32 @@ export function normalizeUpcomingVideos(value) {
     })
 }
 
+function normalizeTitle(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’'`]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function sameGameTitle(expected, candidate) {
+  const left = normalizeTitle(expected)
+  const right = normalizeTitle(candidate)
+  if (!left || !right) return false
+  if (left === right) return true
+  return right.endsWith(` ${left}`)
+}
+
 export function normalizeUpcomingExtended(match) {
   if (!match) return null
 
   return {
+    id: match.id ?? null,
+    name: match.name || '',
     summary: match.summary || '',
     storyline: match.storyline || '',
     screenshots: normalizeUpcomingImages(match.screenshots),
@@ -114,7 +136,7 @@ export function useUpcomingGameExtended(gameName, sourceGameId) {
   useEffect(() => {
     if (!sourceGameId && !gameName) return
 
-    const cacheKey = sourceGameId || gameName
+    const cacheKey = `${sourceGameId || 'name'}:${normalizeTitle(gameName)}`
     const cached = _extCache.get(cacheKey)
     if (cached && (Date.now() - cached.fetchedAt) < EXT_TTL_MS) {
       setData(cached.data)
@@ -122,6 +144,7 @@ export function useUpcomingGameExtended(gameName, sourceGameId) {
     }
 
     let cancelled = false
+    setData(null)
     setLoading(true)
 
     async function fetchExtended() {
@@ -146,7 +169,7 @@ export function useUpcomingGameExtended(gameName, sourceGameId) {
             match = (sourceGameId
               ? results.find((result) => String(result.id) === String(sourceGameId))
               : null
-            ) || results[0]
+            ) || results.find((result) => sameGameTitle(gameName, result.name)) || null
           }
         } catch (err) {
           if (import.meta.env.DEV) console.warn('[useUpcomingGameExtended] name search failed:', err)
@@ -160,7 +183,7 @@ export function useUpcomingGameExtended(gameName, sourceGameId) {
       if (gameName && (!extended || (extended.screenshots.length === 0 && extended.artworks.length === 0))) {
         try {
           const rawgMedia = await fetchRawgMediaByTitle(gameName)
-          if (rawgMedia) {
+          if (rawgMedia?.isExactMatch) {
             extended = {
               ...(extended || normalizeUpcomingExtended({})),
               screenshots: [

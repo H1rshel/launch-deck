@@ -419,7 +419,7 @@ export default function UpcomingGameDetail() {
   const summary = typeof game.summary === "string" ? game.summary.trim() : "";
 
   const reasons = matchReasons(game, profile, 4);
-  const descSummary = summary || ext?.summary || "";
+  const descSummary = ext?.summary || summary || "";
   const storyline = ext?.storyline || "";
   const screenshots = mergeImages(
     ext?.screenshots,

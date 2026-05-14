@@ -122,6 +122,25 @@ export function bestMatch(results, searchTerm) {
   return bestScore >= 0.5 ? best : null
 }
 
+function normalizeMediaTitle(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’'`]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function isExactOrSeriesTitle(expected, candidate) {
+  const left = normalizeMediaTitle(expected)
+  const right = normalizeMediaTitle(candidate)
+  if (!left || !right) return false
+  return left === right || right.endsWith(` ${left}`)
+}
+
 /**
  * Fetch metadata for a single game from RAWG.
  * Tries multiple search strategies in priority order.
@@ -178,7 +197,7 @@ export async function fetchRawgMediaByTitle(title) {
   try {
     const results = await searchGame(title)
     const match = bestMatch(results, title)
-    if (!match?.id) return null
+    if (!match?.id || !isExactOrSeriesTitle(title, match.name)) return null
 
     const screenshotsRes = await fetch(`${BASE_URL}/games/${match.id}/screenshots?key=${API_KEY}`)
     const screenshotsData = screenshotsRes.ok ? await screenshotsRes.json() : null
@@ -187,6 +206,8 @@ export async function fetchRawgMediaByTitle(title) {
       .filter(Boolean)
 
     return {
+      isExactMatch: true,
+      matchedTitle: match.name,
       screenshots,
       artworks: match.background_image ? [match.background_image] : [],
     }
