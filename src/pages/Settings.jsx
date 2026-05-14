@@ -276,6 +276,33 @@ function SteamPlatformRow() {
     return () => clearTimeout(t)
   }, [justConnected])
 
+  useEffect(() => {
+    if (!profile?.steamId) return
+    if (profile.personaName && profile.avatarUrl) return
+
+    let cancelled = false
+    invoke("get_steam_profile", { steamId: profile.steamId })
+      .then((result) => {
+        if (cancelled || !result) return
+
+        const nextProfile = {
+          steamId: result.steamId || profile.steamId,
+          personaName: result.personaName || profile.personaName || "",
+          avatarUrl: result.avatarUrl || profile.avatarUrl || "",
+        }
+
+        localStorage.setItem("steamId", nextProfile.steamId)
+        localStorage.setItem("steamPersonaName", nextProfile.personaName)
+        localStorage.setItem("steamAvatarUrl", nextProfile.avatarUrl)
+        setProfile(nextProfile)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.steamId, profile?.personaName, profile?.avatarUrl])
+
   async function handleConnect() {
     cancelRef.current = false
     setConnecting(true)

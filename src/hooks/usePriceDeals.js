@@ -16,6 +16,28 @@ const STORE_NAMES = {
 const _priceCache = new Map()
 const PRICE_TTL_MS = 15 * 60 * 1000  // 15 min
 
+async function fetchCheapSharkDeals(gameTitle) {
+  try {
+    return await invoke('fetch_cheapshark_deals', { gameTitle })
+  } catch (invokeError) {
+    const encoded = encodeURIComponent(gameTitle)
+    const url = `https://www.cheapshark.com/api/1.0/deals?title=${encoded}&upperPrice=100&pageSize=12&sortBy=Price`
+    const res = await fetch(url)
+    if (!res.ok) throw invokeError
+
+    const raw = await res.json()
+    return (raw || []).map((d) => ({
+      title: d.title,
+      salePrice: d.salePrice,
+      normalPrice: d.normalPrice,
+      savings: d.savings,
+      storeId: d.storeID,
+      dealId: d.dealID,
+      thumb: d.thumb,
+    }))
+  }
+}
+
 /**
  * Fetch price deals from CheapShark for a given game title.
  * Returns sorted by price (cheapest first), deduplicated by store.
@@ -37,22 +59,26 @@ export function usePriceDeals(gameTitle) {
     let cancelled = false
     setLoading(true)
 
-    invoke('fetch_cheapshark_deals', { gameTitle })
+    fetchCheapSharkDeals(gameTitle)
       .then(raw => {
         if (cancelled) return
 
         // Deduplicate by store (keep cheapest per store)
         const byStore = new Map()
         for (const d of raw || []) {
-          const storeName = STORE_NAMES[d.storeId] || `Store #${d.storeId}`
-          if (!byStore.has(storeName) || parseFloat(d.salePrice) < parseFloat(byStore.get(storeName).salePrice)) {
+          const storeId = d.storeId || d.storeID
+          const dealId = d.dealId || d.dealID
+          const salePrice = d.salePrice || d.sale_price
+          const normalPrice = d.normalPrice || d.normal_price
+          const storeName = STORE_NAMES[storeId] || `Store #${storeId}`
+          if (!byStore.has(storeName) || parseFloat(salePrice) < parseFloat(byStore.get(storeName).salePrice)) {
             byStore.set(storeName, {
               store: storeName,
-              salePrice: d.salePrice,
-              normalPrice: d.normalPrice,
+              salePrice,
+              normalPrice,
               savings: parseFloat(d.savings || '0'),
-              dealId: d.dealId,
-              redirectUrl: `https://www.cheapshark.com/redirect?dealID=${encodeURIComponent(d.dealId)}`,
+              dealId,
+              redirectUrl: `https://www.cheapshark.com/redirect?dealID=${encodeURIComponent(dealId)}`,
             })
           }
         }

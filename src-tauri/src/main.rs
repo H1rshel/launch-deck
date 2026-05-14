@@ -760,6 +760,95 @@ struct SteamConnectResult {
     avatar_url: String,
 }
 
+fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
+    let open = format!("<{}>", tag);
+    let close = format!("</{}>", tag);
+    let start = xml.find(&open)? + open.len();
+    let end = xml[start..].find(&close)? + start;
+    let mut value = xml[start..end].trim().to_string();
+
+    if value.starts_with("<![CDATA[") && value.ends_with("]]>") {
+        value = value
+            .trim_start_matches("<![CDATA[")
+            .trim_end_matches("]]>")
+            .to_string();
+    }
+
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+async fn fetch_steam_public_profile(
+    client: &reqwest::Client,
+    steam_id: &str,
+) -> Result<SteamConnectResult, String> {
+    let url = format!("https://steamcommunity.com/profiles/{}/?xml=1", steam_id);
+    let xml = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Steam public profile request failed: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("Steam public profile response unreadable: {e}"))?;
+
+    let persona_name = extract_xml_tag(&xml, "steamID").unwrap_or_default();
+    let avatar_url = extract_xml_tag(&xml, "avatarFull").unwrap_or_default();
+
+    if persona_name.is_empty() && avatar_url.is_empty() {
+        return Err("Steam public profile did not include profile details.".to_string());
+    }
+
+    Ok(SteamConnectResult {
+        steam_id: steam_id.to_string(),
+        persona_name,
+        avatar_url,
+    })
+}
+
+async fn fetch_steam_profile(
+    client: &reqwest::Client,
+    steam_key: &str,
+    steam_id: &str,
+) -> Result<SteamConnectResult, String> {
+    if !steam_key.trim().is_empty() {
+        let url = format!(
+            "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={}&steamids={}",
+            steam_key.trim(),
+            steam_id
+        );
+
+        if let Ok(res) = client.get(&url).send().await {
+            if let Ok(data) = res.json::<SteamProfileResponse>().await {
+                if let Some(player) = data.response.players.into_iter().next() {
+                    return Ok(SteamConnectResult {
+                        steam_id: steam_id.to_string(),
+                        persona_name: player.personaname,
+                        avatar_url: player.avatarfull,
+                    });
+                }
+            }
+        }
+    }
+
+    fetch_steam_public_profile(client, steam_id).await
+}
+
+#[tauri::command]
+async fn get_steam_profile(steam_id: String) -> Result<SteamConnectResult, String> {
+    let steam_key = get_env("STEAM_API_KEY").unwrap_or_default();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent(APP_USER_AGENT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    fetch_steam_profile(&client, &steam_key, &steam_id).await
+}
+
 /// Extract the raw query string from an HTTP GET request first line.
 fn extract_query_string(request: &str) -> Option<String> {
     let first_line = request.lines().next()?;
@@ -991,27 +1080,10 @@ async fn connect_steam() -> Result<SteamConnectResult, String> {
         Ok(inner) => inner?,
     };
 
-    // Fetch the Steam profile (persona name + avatar) when an API key is available
-    if !steam_key.trim().is_empty() {
-        let url = format!(
-            "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={}&steamids={}",
-            steam_key.trim(),
-            steam_id
-        );
-        if let Ok(res) = client.get(&url).send().await {
-            if let Ok(data) = res.json::<SteamProfileResponse>().await {
-                if let Some(player) = data.response.players.into_iter().next() {
-                    return Ok(SteamConnectResult {
-                        steam_id,
-                        persona_name: player.personaname,
-                        avatar_url: player.avatarfull,
-                    });
-                }
-            }
-        }
+    if let Ok(profile) = fetch_steam_profile(&client, &steam_key, &steam_id).await {
+        return Ok(profile);
     }
 
-    // Return without profile info when no API key is configured
     Ok(SteamConnectResult {
         steam_id,
         persona_name: String::new(),
@@ -6882,6 +6954,7 @@ fn main() {
             open_url,
             open_in_file_manager,
             connect_gog,
+            get_steam_profile,
             refresh_gog_token,
             get_gog_owned_games,
             connect_epic,
