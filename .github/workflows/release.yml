@@ -47,36 +47,66 @@ jobs:
             Write-Error "Missing updater signing key. Add a repository secret named TAURI_SIGNING_PRIVATE_KEY, or TAURI_PRIVATE_KEY for backwards compatibility."
           }
 
+          function Get-KeyCandidate([string]$value) {
+            $candidate = $value.Trim()
+            if ($candidate -match "Private Key:\s*(?<key>[A-Za-z0-9+/=\s]+)") {
+              $candidate = $Matches.key.Trim()
+            }
+            return $candidate
+          }
+
+          function Add-Base64Padding([string]$value) {
+            $clean = ($value -replace "\s", "").Trim()
+            switch ($clean.Length % 4) {
+              2 { $clean = "$clean==" }
+              3 { $clean = "$clean=" }
+            }
+            return $clean
+          }
+
+          function Decode-Base64Text([string]$value) {
+            $normalized = Add-Base64Padding $value
+            return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($normalized))
+          }
+
           function Test-DecodedKeyText([string]$value) {
             return $value -match "untrusted comment:" -and $value -match "secret key"
           }
 
           function Test-KeyFileText([string]$value) {
             try {
-              $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($value.Trim()))
+              $decoded = Decode-Base64Text $value
               return Test-DecodedKeyText $decoded
             } catch {
               return $false
             }
           }
 
-          $keyFileText = $key.Trim()
-          if (-not (Test-KeyFileText $keyFileText)) {
+          $candidate = Get-KeyCandidate $key
+          $keyFileText = $null
+
+          if (Test-KeyFileText $candidate) {
+            $keyFileText = Add-Base64Padding $candidate
+          } elseif (Test-DecodedKeyText $candidate) {
+            $keyFileText = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($candidate))
+          } else {
             try {
-              $decodedOnce = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($key.Trim()))
+              $decodedOnce = Decode-Base64Text $candidate
               if (Test-KeyFileText $decodedOnce) {
-                $keyFileText = $decodedOnce.Trim()
-              } elseif (Test-DecodedKeyText $key) {
-                $keyFileText = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($key))
+                $keyFileText = Add-Base64Padding $decodedOnce
+              } elseif (Test-DecodedKeyText $decodedOnce) {
+                $keyFileText = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($decodedOnce))
               }
             } catch {
-              if (Test-DecodedKeyText $key) {
-                $keyFileText = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($key))
-              }
+              Write-Error "Invalid updater signing key. Re-create TAURI_SIGNING_PRIVATE_KEY from the generated private key, including any trailing '=' padding characters."
             }
           }
 
-          $keyPath = Join-Path $env:RUNNER_TEMP "launch-deck-updater.key"
+          if ([string]::IsNullOrWhiteSpace($keyFileText) -or -not (Test-KeyFileText $keyFileText)) {
+            Write-Error "Invalid updater signing key. Re-create TAURI_SIGNING_PRIVATE_KEY from the generated private key, including any trailing '=' padding characters."
+          }
+
+          $keyPath = (Join-Path $env:RUNNER_TEMP "launch-deck-updater.key").Replace("\", "/")
           [IO.File]::WriteAllText($keyPath, $keyFileText, [Text.UTF8Encoding]::new($false))
           "TAURI_SIGNING_PRIVATE_KEY=$keyPath" >> $env:GITHUB_ENV
           "TAURI_PRIVATE_KEY=$keyPath" >> $env:GITHUB_ENV
