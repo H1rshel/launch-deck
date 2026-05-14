@@ -10,7 +10,7 @@ import {
   downloadAndInstallUpdate,
   relaunchApp,
 } from "../services/updateService"
-import { clearUpdateBanner } from "../services/updateState"
+import { clearUpdateBanner, getUpdateBanner, subscribeUpdateBanner } from "../services/updateState"
 import TopBar from "../components/layout/TopBar"
 import PageHeader from "../components/layout/PageHeader"
 import { useAuth } from "../hooks/useAuth"
@@ -771,6 +771,7 @@ const UPDATE_BEHAVIOR_OPTIONS = [
 ]
 
 function UpdatesSection() {
+  const location = useLocation()
   const { settings, setSetting } = useSettingsContext()
   const { addNotification } = useNotifications()
   const [version, setVersion] = useState(null)
@@ -778,6 +779,7 @@ function UpdatesSection() {
   const [downloadProgress, setDownloadProgress] = useState(null)
   const [updateReady, setUpdateReady] = useState(false)
   const updateRef = useRef(null)
+  const autoCheckRef = useRef(false)
 
   useEffect(() => {
     getCurrentAppVersion().then((v) => setVersion(v))
@@ -788,6 +790,50 @@ function UpdatesSection() {
   const available = checkStatus?.status === "available"
   const notAvailable = checkStatus?.status === "not_available"
   const hasError = checkStatus?.status === "error"
+
+  function applyUpdateBanner(banner) {
+    if (!banner) return false
+
+    setDownloadProgress(null)
+
+    if (banner.ready) {
+      updateRef.current = null
+      setUpdateReady(true)
+      setCheckStatus(null)
+      clearUpdateBanner()
+      return true
+    }
+
+    if (!banner.update) return false
+
+    updateRef.current = banner.update
+    setUpdateReady(false)
+    setCheckStatus({
+      status: "available",
+      update: banner.update,
+      version: banner.version,
+      notes: banner.notes,
+    })
+    clearUpdateBanner()
+    return true
+  }
+
+  useEffect(() => {
+    applyUpdateBanner(getUpdateBanner())
+    return subscribeUpdateBanner((banner) => {
+      applyUpdateBanner(banner)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (location.state?.scrollTo !== "updates") return
+    if (autoCheckRef.current) return
+    if (!isUpdaterAvailable()) return
+    if (updateRef.current || updateReady || checkStatus?.status === "available") return
+
+    autoCheckRef.current = true
+    handleCheck()
+  }, [location.state, updateReady, checkStatus])
 
   function formatDate(iso) {
     if (!iso) return null

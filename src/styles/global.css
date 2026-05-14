@@ -19172,7 +19172,7 @@ h6 {
 }
 
 .settings__update-card {
-  margin-top: 8px;
+  margin: 16px 20px 0;
   padding: 14px 16px;
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -19277,7 +19277,7 @@ h6 {
   align-items: center;
   gap: 6px;
   font-size: 0.8125rem;
-  margin: 14px 22px 0;
+  margin: 16px 20px 0;
   color: var(--text-muted);
   line-height: 1.45;
 }

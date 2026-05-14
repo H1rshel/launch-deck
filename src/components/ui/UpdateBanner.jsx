@@ -23,7 +23,6 @@ export default function UpdateBanner({ banner }) {
   }
 
   function goToSettings() {
-    clearUpdateBanner()
     navigate('/settings', { state: { scrollTo: 'updates' } })
   }
 

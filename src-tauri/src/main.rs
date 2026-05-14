@@ -5392,7 +5392,7 @@ async fn close_splashscreen(window: tauri::Window, fullscreen: Option<bool>, max
 
     // Close splashscreen
     if let Some(splashscreen) = window.get_webview_window("splashscreen") {
-        splashscreen.close().unwrap();
+        let _ = splashscreen.close();
     }
     // Apply window state before show() so the user never sees an intermediate size
     if let Some(main_window) = window.get_webview_window("main") {
@@ -5401,8 +5401,8 @@ async fn close_splashscreen(window: tauri::Window, fullscreen: Option<bool>, max
         } else if maximize.unwrap_or(false) {
             let _ = main_window.maximize();
         }
-        main_window.show().unwrap();
-        main_window.set_focus().unwrap();
+        let _ = main_window.show();
+        let _ = main_window.set_focus();
     }
 }
 
@@ -6807,6 +6807,30 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(12)).await;
+
+                use tauri::Manager;
+
+                if let Some(main_window) = app_handle.get_webview_window("main") {
+                    if main_window.is_visible().unwrap_or(false) {
+                        return;
+                    }
+
+                    if let Some(splashscreen) = app_handle.get_webview_window("splashscreen") {
+                        let _ = splashscreen.close();
+                    }
+
+                    let _ = main_window.maximize();
+                    let _ = main_window.show();
+                    let _ = main_window.set_focus();
+                }
+            });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             close_splashscreen,
             scan_for_exes,
