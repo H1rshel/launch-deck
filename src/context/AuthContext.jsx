@@ -113,6 +113,35 @@ export function AuthProvider({ children }) {
       }
     )
 
+    async function restoreInitialSession() {
+      try {
+        const { data, error: sessionError } = await supabase.auth.getSession()
+        if (!mounted) return
+
+        if (sessionError) throw sessionError
+
+        const initialSession = data?.session ?? null
+        setSession(initialSession)
+        setUser(initialSession?.user ?? null)
+      } catch (err) {
+        if (!mounted) return
+
+        if (import.meta.env.DEV) {
+          console.error('[Auth] Failed to restore initial session:', err)
+        }
+
+        setSession(null)
+        setUser(null)
+      } finally {
+        if (mounted) {
+          setSigningIn(false)
+          setLoading(false)
+        }
+      }
+    }
+
+    restoreInitialSession()
+
     return () => {
       mounted = false
       subscription.unsubscribe()

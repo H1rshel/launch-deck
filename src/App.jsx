@@ -53,16 +53,38 @@ export default function App() {
     }
   }, [authLoading, user])
 
-  // Close the native Tauri splash screen window once React is fully loaded (Auth + DB)
+  // Close the native Tauri splash screen once React is ready. The fallback keeps
+  // the installed app usable if one startup service gets stuck.
   useEffect(() => {
+    let cancelled = false
+
+    async function closeSplashscreen() {
+      if (cancelled) return
+
+      let startupMode = 'normal'
+      try {
+        startupMode = JSON.parse(localStorage.getItem('ld_setting_startupMode') || '"normal"')
+      } catch {
+        startupMode = 'normal'
+      }
+
+      const isConsole = startupMode === 'console'
+      await invoke('close_splashscreen', { fullscreen: isConsole, maximize: !isConsole }).catch(console.error)
+    }
+
     if (!isLoading) {
       // Small delay ensures React has painted before showing the window
-      const timer = setTimeout(async () => {
-        const startupMode = JSON.parse(localStorage.getItem('ld_setting_startupMode') || '"normal"')
-        const isConsole = startupMode === 'console'
-        await invoke('close_splashscreen', { fullscreen: isConsole, maximize: !isConsole }).catch(console.error)
-      }, 50)
-      return () => clearTimeout(timer)
+      const timer = setTimeout(closeSplashscreen, 50)
+      return () => {
+        cancelled = true
+        clearTimeout(timer)
+      }
+    }
+
+    const fallbackTimer = setTimeout(closeSplashscreen, 10000)
+    return () => {
+      cancelled = true
+      clearTimeout(fallbackTimer)
     }
   }, [isLoading])
 
