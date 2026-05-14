@@ -85,7 +85,10 @@ export default function NotificationTray({ isOpen, onClose }) {
   function handleNotifClick(n) {
     if (!n.read) markAsRead(n.id)
 
-    if (n.upcomingLink) {
+    if (n.route) {
+      navigate(n.route, n.routeState ? { state: n.routeState } : undefined)
+      onClose()
+    } else if (n.upcomingLink) {
       // Single price-drop notification → upcoming game detail
       navigate(`/upcoming/${n.upcomingLink.source}/${n.upcomingLink.sourceGameId}`)
       onClose()
@@ -146,7 +149,7 @@ export default function NotificationTray({ isOpen, onClose }) {
             </div>
           ) : (
             notifications.map((n) => {
-              const isClickable = n.gameIds?.length > 0 || !!n.upcomingLink || n.saleGamesInfo?.length > 0
+              const isClickable = !!n.route || n.gameIds?.length > 0 || !!n.upcomingLink || n.saleGamesInfo?.length > 0
               const isMultiGame = n.gameIds?.length > 1 || n.saleGamesInfo?.length > 1
               const isDrawerOpen = drawerNotifId === n.id
 

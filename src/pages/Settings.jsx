@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
+import { useLocation } from "react-router-dom"
 import { invoke } from "@tauri-apps/api/core"
 import {
   UPDATE_MODES,
@@ -15,6 +16,7 @@ import PageHeader from "../components/layout/PageHeader"
 import { useAuth } from "../hooks/useAuth"
 import { useScanner } from "../hooks/useScanner"
 import { useSettingsContext } from "../context/SettingsContext"
+import { useNotifications } from "../context/NotificationContext"
 import ScanResultsModal from "../components/games/ScanResultsModal"
 import AddSingleGameModal from "../components/games/AddSingleGameModal"
 import { Select } from "../components/ui/Select"
@@ -770,6 +772,7 @@ const UPDATE_BEHAVIOR_OPTIONS = [
 
 function UpdatesSection() {
   const { settings, setSetting } = useSettingsContext()
+  const { addNotification } = useNotifications()
   const [version, setVersion] = useState(null)
   const [checkStatus, setCheckStatus] = useState(null)
   const [downloadProgress, setDownloadProgress] = useState(null)
@@ -810,6 +813,14 @@ function UpdatesSection() {
     if (result.status === "available") {
       updateRef.current = result.update
       clearUpdateBanner()
+      addNotification({
+        title: `Launch Deck ${result.version} is available`,
+        message: result.notes || "Open Updates to download and install it.",
+        type: "info",
+        route: "/settings",
+        routeState: { scrollTo: "updates" },
+        dedupeKey: `update-available-${result.version}`,
+      })
     }
   }
 
@@ -1021,6 +1032,8 @@ function UpdatesSection() {
 
 export default function Settings() {
   const { signOut } = useAuth()
+  const location = useLocation()
+  const [appVersion, setAppVersion] = useState(null)
   const {
     folders,
     scanning,
@@ -1049,6 +1062,20 @@ export default function Settings() {
     cancelAddSingleGame,
   } = useScanner()
 
+  useEffect(() => {
+    getCurrentAppVersion().then((v) => setAppVersion(v))
+  }, [])
+
+  useEffect(() => {
+    if (location.state?.scrollTo !== "updates") return
+    window.requestAnimationFrame(() => {
+      document.getElementById("settings-updates")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      })
+    })
+  }, [location.state])
+
   return (
     <div className="page settings page--unified">
       <TopBar />
@@ -1059,6 +1086,11 @@ export default function Settings() {
         title="Settings"
         subtitle="Customize Launch Deck, manage your libraries, and connect accounts."
         image="/settings.png"
+        actions={
+          <div className="settings__version-pill">
+            {appVersion ? `Version ${appVersion}` : "Version unavailable"}
+          </div>
+        }
       />
       <div className="page__content">
         {/* Game Folders Section */}

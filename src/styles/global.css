@@ -4815,6 +4815,20 @@ h6 {
   letter-spacing: 0.02em;
 }
 
+.settings__version-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(0, 212, 255, 0.08);
+  color: var(--accent-cyan);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .settings__section-body {
   background: var(--bg-surface);
   border: 1px solid var(--border);

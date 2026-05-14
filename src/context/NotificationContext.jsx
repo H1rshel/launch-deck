@@ -25,7 +25,19 @@ export function NotificationProvider({ children }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(notifications))
   }, [notifications])
 
-  const addNotification = useCallback(({ title, message, type = 'info', image = null, gameIds = null, gamesInfo = null, upcomingLink = null, saleGamesInfo = null }) => {
+  const addNotification = useCallback(({
+    title,
+    message,
+    type = 'info',
+    image = null,
+    gameIds = null,
+    gamesInfo = null,
+    upcomingLink = null,
+    saleGamesInfo = null,
+    route = null,
+    routeState = null,
+    dedupeKey = null,
+  }) => {
     const newNotif = {
       id: generateId(),
       title,
@@ -33,13 +45,21 @@ export function NotificationProvider({ children }) {
       type,
       time: new Date().toISOString(),
       read: false,
+      ...(dedupeKey && { dedupeKey }),
       ...(image && { image }),
       ...(gameIds && { gameIds }),
       ...(gamesInfo && { gamesInfo }),
       ...(upcomingLink && { upcomingLink }),
       ...(saleGamesInfo && { saleGamesInfo }),
+      ...(route && { route }),
+      ...(routeState && { routeState }),
     }
-    setNotifications((prev) => [newNotif, ...prev].slice(0, 50)) // keep last 50
+    setNotifications((prev) => {
+      if (dedupeKey && prev.some((n) => n.dedupeKey === dedupeKey)) {
+        return prev
+      }
+      return [newNotif, ...prev].slice(0, 50)
+    }) // keep last 50
   }, [])
 
   const markAsRead = useCallback((id) => {

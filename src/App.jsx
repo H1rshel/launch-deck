@@ -25,10 +25,12 @@ import { UPDATE_MODES, checkAndNotifyUpdate, downloadAndInstallUpdate } from './
 import { setUpdateBanner } from './services/updateState'
 import { readSetting } from './hooks/useSettings'
 import { initDeepLinkHandler } from './services/deepLinkHandler'
+import { useNotifications } from './context/NotificationContext'
 
 export default function App() {
   const { loading: authLoading, user } = useAuth()
   const { loading: gameLoading } = useGameContext()
+  const { addNotification } = useNotifications()
 
   usePriceWatcher(user)
 
@@ -85,6 +87,14 @@ export default function App() {
           notes: result.notes,
           update: result.update,
         })
+        addNotification({
+          title: `Launch Deck ${result.version} is available`,
+          message: result.notes || 'Open Updates to download and install it.',
+          type: 'info',
+          route: '/settings',
+          routeState: { scrollTo: 'updates' },
+          dedupeKey: `update-available-${result.version}`,
+        })
         return
       }
 
@@ -94,6 +104,14 @@ export default function App() {
           await downloadAndInstallUpdate(result.update, () => {})
           if (!cancelled) {
             setUpdateBanner({ version: result.version, notes: result.notes, update: null, ready: true })
+            addNotification({
+              title: `Launch Deck ${result.version} is ready`,
+              message: 'Restart Launch Deck to apply the update.',
+              type: 'success',
+              route: '/settings',
+              routeState: { scrollTo: 'updates' },
+              dedupeKey: `update-ready-${result.version}`,
+            })
           }
         } catch {
           // Silent failure — user can always check manually in Settings
@@ -103,7 +121,7 @@ export default function App() {
 
     runStartupCheck()
     return () => { cancelled = true }
-  }, [isLoading, user]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isLoading, user, addNotification]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Routes>
