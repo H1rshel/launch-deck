@@ -113,7 +113,7 @@ jobs:
           "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$($env:UPDATER_SIGNING_KEY_PASSWORD)" >> $env:GITHUB_ENV
           "TAURI_PRIVATE_KEY_PASSWORD=$($env:UPDATER_SIGNING_KEY_PASSWORD)" >> $env:GITHUB_ENV
 
-      - name: Validate bundled service secrets
+      - name: Report bundled service secrets
         shell: pwsh
         env:
           IGDB_CLIENT_ID: ${{ secrets.IGDB_CLIENT_ID }}
@@ -138,7 +138,7 @@ jobs:
             }
           }
           if ($missing.Count -gt 0) {
-            Write-Error "Missing repository secret(s): $($missing -join ', '). These are bundled into the desktop app at build time."
+            Write-Warning "Missing repository secret(s): $($missing -join ', '). The app will still build, but keyed integrations will use their fallback paths where available."
           }
 
       - name: Build and Publish Tauri App
