@@ -53,7 +53,11 @@ export default function AchievementsPanel({ gameName, steamId }) {
     setError(null)
     setData(null)
 
-    invoke('get_steam_achievements', { query: gameName, steamId })
+    invoke('get_steam_achievements', {
+      query: gameName,
+      steamId,
+      steamApiKey: localStorage.getItem('steamApiKey') || '',
+    })
       .then((result) => {
         if (!cancelled) setData(result)
       })

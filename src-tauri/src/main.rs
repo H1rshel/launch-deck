@@ -1349,6 +1349,8 @@ async fn resolve_steam_appid(
 async fn get_steam_achievements(
     query: String,
     steam_id: String,
+    app_id: Option<u32>,
+    steam_api_key: Option<String>,
 ) -> Result<AchievementsResult, String> {
     dotenv().ok();
 
@@ -1359,20 +1361,23 @@ async fn get_steam_achievements(
         achievements: None,
     };
 
-    let steam_key = get_env("STEAM_API_KEY").unwrap_or_default();
+    let steam_key = steam_api_key
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let steam_key = if steam_key.is_empty() {
+        get_env("STEAM_API_KEY").unwrap_or_default()
+    } else {
+        steam_key
+    };
     if steam_key.trim().is_empty() {
         return Ok(unavailable(
-            "Steam API key not configured. Add STEAM_API_KEY to .env",
+            "Steam API key not configured. Add a Steam Web API key in Settings",
         ));
     }
     if steam_id.trim().is_empty() {
         return Ok(unavailable("No Steam ID provided"));
     }
-
-    let rawg_key =
-        get_env("VITE_RAWG_API_KEY").map_err(|_| "VITE_RAWG_API_KEY not set".to_string())?;
-    let sgd_key =
-        get_env("VITE_SGD_API_KEY").map_err(|_| "VITE_SGD_API_KEY not set".to_string())?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -1380,9 +1385,22 @@ async fn get_steam_achievements(
         .unwrap_or_else(|_| reqwest::Client::new());
 
     // Step 1 – resolve Steam AppID
-    let appid = match resolve_steam_appid(&client, &query, &rawg_key, &sgd_key).await {
-        Some(id) => id,
-        None => return Ok(unavailable("No Steam AppID found for this game")),
+    let appid = if let Some(id) = app_id.filter(|id| *id > 0) {
+        id
+    } else {
+        let rawg_key = match get_env("VITE_RAWG_API_KEY") {
+            Ok(key) => key,
+            Err(_) => return Ok(unavailable("No Steam AppID found for this game")),
+        };
+        let sgd_key = match get_env("VITE_SGD_API_KEY") {
+            Ok(key) => key,
+            Err(_) => return Ok(unavailable("No Steam AppID found for this game")),
+        };
+
+        match resolve_steam_appid(&client, &query, &rawg_key, &sgd_key).await {
+            Some(id) => id,
+            None => return Ok(unavailable("No Steam AppID found for this game")),
+        }
     };
 
     // Step 2 – fetch player achievements
@@ -1520,31 +1538,44 @@ struct SteamPlaytimeData {
 async fn get_steam_playtime(
     query: String,
     steam_id: String,
+    app_id: Option<u32>,
+    steam_api_key: Option<String>,
 ) -> Result<Option<SteamPlaytimeData>, String> {
     dotenv().ok();
 
-    let steam_key = get_env("STEAM_API_KEY").unwrap_or_default();
+    let steam_key = steam_api_key
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let steam_key = if steam_key.is_empty() {
+        get_env("STEAM_API_KEY").unwrap_or_default()
+    } else {
+        steam_key
+    };
     if steam_key.trim().is_empty() || steam_id.trim().is_empty() {
         return Ok(None);
     }
-
-    let rawg_key = match get_env("VITE_RAWG_API_KEY") {
-        Ok(k) if !k.trim().is_empty() => k,
-        _ => return Ok(None),
-    };
-    let sgd_key = match get_env("VITE_SGD_API_KEY") {
-        Ok(k) if !k.trim().is_empty() => k,
-        _ => return Ok(None),
-    };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let app_id = match resolve_steam_appid(&client, &query, &rawg_key, &sgd_key).await {
-        Some(id) => id,
-        None => return Ok(None),
+    let app_id = if let Some(id) = app_id.filter(|id| *id > 0) {
+        id
+    } else {
+        let rawg_key = match get_env("VITE_RAWG_API_KEY") {
+            Ok(k) if !k.trim().is_empty() => k,
+            _ => return Ok(None),
+        };
+        let sgd_key = match get_env("VITE_SGD_API_KEY") {
+            Ok(k) if !k.trim().is_empty() => k,
+            _ => return Ok(None),
+        };
+        match resolve_steam_appid(&client, &query, &rawg_key, &sgd_key).await {
+            Some(id) => id,
+            None => return Ok(None),
+        }
     };
 
     let url = format!(
@@ -5324,10 +5355,10 @@ async fn get_hltb_auth(client: &reqwest::Client) -> Result<HltbInitResponse, Str
         .unwrap_or_default()
         .as_millis();
 
-    // HLTB uses /api/find/init to hand out tokens and header keys
+    // HLTB uses /api/bleed/init to hand out tokens and header keys.
     let res = client
-        .get(&format!("https://howlongtobeat.com/api/find/init?t={}", ts))
-        .header("Accept", "application/json, text/plain, */*")
+        .get(&format!("https://howlongtobeat.com/api/bleed/init?t={}", ts))
+        .header("Accept", "*/*")
         .header("Referer", "https://howlongtobeat.com/")
         .header("Cookie", "hltb_alive=1")
         .send()
@@ -5413,11 +5444,11 @@ async fn get_hltb_data(query: String) -> HltbResult {
     body.insert(auth.hp_key.clone(), serde_json::json!(auth.hp_val));
 
     let res = match client
-        .post("https://howlongtobeat.com/api/find")
+        .post("https://howlongtobeat.com/api/bleed")
         .header("Content-Type", "application/json")
         .header("Origin", "https://howlongtobeat.com")
         .header("Referer", "https://howlongtobeat.com/")
-        .header("Accept", "application/json, text/plain, */*")
+        .header("Accept", "*/*")
         .header("Cookie", "hltb_alive=1")
         .header("x-auth-token", auth.token)
         .header("x-hp-key", auth.hp_key)

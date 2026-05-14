@@ -6,7 +6,7 @@ export const SETTING_DEFAULTS = {
   startupMode: 'normal',
   launchAtStartup: false,
   startMinimized: false,
-  animationsEnabled: true,
+  animationsEnabled: false,
   compactMode: false,
   accentColor: 'cyan',
   defaultSort: 'name',

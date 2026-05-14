@@ -43,6 +43,7 @@ import {
   Zap,
   Circle,
   CheckCircle,
+  KeyRound,
 } from "lucide-react"
 import SteamIconSolid from "../components/icons/SteamIconSolid"
 import GogIcon from "../components/icons/GogIcon"
@@ -148,6 +149,64 @@ function AccentColorPicker() {
         </label>
       </div>
     </div>
+  )
+}
+
+function ApiKeysSection() {
+  const [steamApiKey, setSteamApiKey] = useState(
+    () => localStorage.getItem("steamApiKey") || "",
+  )
+  const [saved, setSaved] = useState(false)
+
+  function saveSteamApiKey(value) {
+    setSteamApiKey(value)
+    try {
+      const trimmed = value.trim()
+      if (trimmed) {
+        localStorage.setItem("steamApiKey", trimmed)
+      } else {
+        localStorage.removeItem("steamApiKey")
+      }
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 1200)
+    } catch {}
+  }
+
+  return (
+    <section className="settings__section settings__section--animated settings__section--glass">
+      <div className="settings__section-header">
+        <KeyRound size={20} className="settings__section-icon" />
+        <div className="settings__section-header-text">
+          <h2 className="settings__section-title">API Keys</h2>
+          <p className="settings__section-description">
+            Local keys used by optional integrations on this device.
+          </p>
+        </div>
+      </div>
+      <div className="settings__section-body">
+        <div className="setting-row setting-row--block">
+          <div className="setting-row__info">
+            <span className="setting-row__label">Steam Web API key</span>
+            <span className="setting-row__desc">
+              Required for your Steam achievements and playtime details.
+            </span>
+          </div>
+          <div className="setting-secret-row">
+            <input
+              className="setting-secret-input"
+              type="password"
+              value={steamApiKey}
+              onChange={(event) => saveSteamApiKey(event.target.value)}
+              placeholder="Paste Steam Web API key"
+              autoComplete="off"
+            />
+            <span className="setting-secret-status">
+              {saved ? "Saved" : steamApiKey ? "Configured" : "Not set"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -1353,6 +1412,8 @@ export default function Settings() {
         </section>
 
         <PlatformAccountsSection />
+
+        <ApiKeysSection />
 
         <UpdatesSection />
 

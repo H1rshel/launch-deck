@@ -790,6 +790,8 @@ export function GameProvider({ children }) {
                         game.normalized_title ||
                         game.title,
                       steamId,
+                      appId: Number.parseInt(game.steam_app_id, 10) || null,
+                      steamApiKey: localStorage.getItem("steamApiKey") || "",
                     });
                     const newAchs = (postData?.achievements || []).filter(
                       (a) => a.unlocked && a.unlock_time >= sessionStartSecs,

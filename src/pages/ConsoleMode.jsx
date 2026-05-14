@@ -232,12 +232,14 @@ export default function ConsoleMode() {
       if (!isTauri) return
 
       const variants = generateSearchVariants(game.displayTitle, game.title)
+      const appId = Number.parseInt(game.steam_app_id, 10) || null
+      const steamApiKey = localStorage.getItem('steamApiKey') || ''
 
       // Playtime
       for (const variant of variants) {
         if (cancelled) break
         try {
-          const data = await invoke('get_steam_playtime', { query: variant, steamId })
+          const data = await invoke('get_steam_playtime', { query: variant, steamId, appId, steamApiKey })
           if (data && !cancelled) {
             setSteamPlaytime(data)
             break
@@ -249,7 +251,7 @@ export default function ConsoleMode() {
       for (const variant of variants) {
         if (cancelled) break
         try {
-          const data = await invoke('get_steam_achievements', { query: variant, steamId })
+          const data = await invoke('get_steam_achievements', { query: variant, steamId, appId, steamApiKey })
           if (data && !cancelled) {
             setAchData(data)
             break

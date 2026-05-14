@@ -17,6 +17,28 @@ const _priceCache = new Map()
 const PRICE_TTL_MS = 15 * 60 * 1000  // 15 min
 
 async function fetchCheapSharkDeals(gameTitle) {
+  const variants = [
+    gameTitle,
+    gameTitle.replace(/\s*\([^)]*\)\s*/g, ' ').trim(),
+    gameTitle.split(':')[0]?.trim(),
+  ].filter(Boolean)
+  const uniqueVariants = [...new Set(variants)]
+
+  let lastError = null
+  for (const title of uniqueVariants) {
+    try {
+      const result = await fetchCheapSharkDealsForTitle(title)
+      if (Array.isArray(result) && result.length > 0) return result
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  if (lastError) throw lastError
+  return []
+}
+
+async function fetchCheapSharkDealsForTitle(gameTitle) {
   try {
     return await invoke('fetch_cheapshark_deals', { gameTitle })
   } catch (invokeError) {
@@ -36,6 +58,14 @@ async function fetchCheapSharkDeals(gameTitle) {
       thumb: d.thumb,
     }))
   }
+}
+
+function normalizeTitleForCompare(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/(?:deluxe|ultimate|complete|upgrade|dlc|season pass|bundle|edition)/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }
 
 /**
@@ -65,7 +95,12 @@ export function usePriceDeals(gameTitle) {
 
         // Deduplicate by store (keep cheapest per store)
         const byStore = new Map()
+        const wantedTitle = normalizeTitleForCompare(gameTitle)
         for (const d of raw || []) {
+          const dealTitle = normalizeTitleForCompare(d.title)
+          if (wantedTitle && dealTitle && !dealTitle.includes(wantedTitle) && !wantedTitle.includes(dealTitle)) {
+            continue
+          }
           const storeId = d.storeId || d.storeID
           const dealId = d.dealId || d.dealID
           const salePrice = d.salePrice || d.sale_price

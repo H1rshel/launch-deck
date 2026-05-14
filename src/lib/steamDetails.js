@@ -15,12 +15,16 @@ export async function fetchSteamPlaytime(game, steamId) {
   }
 
   const variants = generateSearchVariants(game.displayTitle, game.title)
+  const appId = Number.parseInt(game.steam_app_id, 10) || null
+  const steamApiKey = localStorage.getItem('steamApiKey') || ''
 
   for (const variant of variants) {
     try {
       const result = await invoke('get_steam_playtime', {
         query: variant,
         steamId,
+        appId,
+        steamApiKey,
       })
       if (result) return normalizeSteamPlaytimePayload(result)
     } catch (_) {
@@ -49,12 +53,16 @@ export async function fetchSteamAchievements(game, steamId) {
   }
 
   const variants = generateSearchVariants(game.displayTitle, game.title)
+  const appId = Number.parseInt(game.steam_app_id, 10) || null
+  const steamApiKey = localStorage.getItem('steamApiKey') || ''
 
   for (const variant of variants) {
     try {
       const result = await invoke('get_steam_achievements', {
         query: variant,
         steamId,
+        appId,
+        steamApiKey,
       })
       if (result) return normalizeAchievementsPayload(result)
     } catch (_) {
