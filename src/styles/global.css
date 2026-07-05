@@ -494,7 +494,7 @@ h6 {
   content: "";
   position: absolute;
   top: 0;
-  left: -60%;
+  left: 0;
   width: 40%;
   height: 100%;
   background: linear-gradient(
@@ -503,37 +503,31 @@ h6 {
     rgba(255, 255, 255, 0.08),
     transparent
   );
-  transform: skewX(-15deg);
+  transform: translateX(-150%) skewX(-15deg);
   animation: logo-sweep 5s ease-in-out infinite;
   pointer-events: none;
   z-index: 2;
 }
 
 @keyframes logo-float {
+  /* Only the transform floats now — box-shadow is static on .logo__frame.
+     Animating a 70px-blur shadow every frame was a large repaint region. */
   0%,
   100% {
     transform: translateY(0);
-    box-shadow:
-      0 12px 40px rgba(0, 0, 0, 0.5),
-      0 0 50px rgba(0, 212, 255, 0.08),
-      0 0 20px rgba(123, 47, 247, 0.05);
   }
   50% {
     transform: translateY(-8px);
-    box-shadow:
-      0 20px 50px rgba(0, 0, 0, 0.4),
-      0 0 70px rgba(0, 212, 255, 0.14),
-      0 0 30px rgba(123, 47, 247, 0.08);
   }
 }
 
 @keyframes logo-sweep {
   0%,
   100% {
-    left: -60%;
+    transform: translateX(-150%) skewX(-15deg);
   }
   50% {
-    left: 110%;
+    transform: translateX(275%) skewX(-15deg);
   }
 }
 
@@ -2328,7 +2322,7 @@ h6 {
   content: "";
   position: absolute;
   top: 0;
-  left: -100%;
+  left: 0;
   width: 60%;
   height: 100%;
   background: linear-gradient(
@@ -2337,16 +2331,17 @@ h6 {
     rgba(0, 212, 255, 0.25),
     transparent
   );
+  transform: translateX(-167%);
   animation: badge-shimmer 3s ease-in-out infinite;
 }
 
 @keyframes badge-shimmer {
   0%,
   100% {
-    left: -100%;
+    transform: translateX(-167%);
   }
   50% {
-    left: 150%;
+    transform: translateX(250%);
   }
 }
 
@@ -2637,8 +2632,24 @@ h6 {
   border: none;
   pointer-events: none;
   z-index: 2;
-  animation: new-badge-pulse 2.5s ease-in-out infinite;
+  /* Static base glow; the pulse lives on ::after as an opacity fade so it is
+     GPU-composited. Animating box-shadow here repainted every "New" card every
+     frame — the dominant cause of library scroll/hover jank. */
+  box-shadow:
+    0 0 8px rgba(0, 212, 255, 0.55),
+    0 2px 6px rgba(0, 0, 0, 0.4);
   transition: opacity 0.2s ease;
+}
+
+.game-card__new-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.95);
+  opacity: 0;
+  pointer-events: none;
+  animation: new-badge-pulse 2.5s ease-in-out infinite;
 }
 
 .game-card:hover .game-card__new-badge {
@@ -2648,14 +2659,10 @@ h6 {
 @keyframes new-badge-pulse {
   0%,
   100% {
-    box-shadow:
-      0 0 8px rgba(0, 212, 255, 0.55),
-      0 2px 6px rgba(0, 0, 0, 0.4);
+    opacity: 0;
   }
   50% {
-    box-shadow:
-      0 0 20px rgba(0, 212, 255, 0.95),
-      0 2px 6px rgba(0, 0, 0, 0.4);
+    opacity: 1;
   }
 }
 
@@ -14954,6 +14961,12 @@ h6 {
 }
 
 .upcoming-card--urgent {
+  /* Static blurred glow (was animated, which repainted the shadow every frame);
+     only the thin border-color pulses now, which is a cheap repaint. */
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 8px 24px rgba(0, 0, 0, 0.25),
+    0 0 32px rgba(251, 191, 36, 0.35);
   animation: upcoming-urgent-pulse 2s ease-in-out infinite;
 }
 
@@ -14961,17 +14974,9 @@ h6 {
   0%,
   100% {
     border-color: rgba(251, 191, 36, 0.55);
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.2),
-      0 8px 24px rgba(0, 0, 0, 0.25),
-      0 0 22px rgba(251, 191, 36, 0.25);
   }
   50% {
     border-color: rgba(251, 191, 36, 0.9);
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.2),
-      0 8px 24px rgba(0, 0, 0, 0.25),
-      0 0 40px rgba(251, 191, 36, 0.45);
   }
 }
 
