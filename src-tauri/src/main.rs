@@ -6955,25 +6955,18 @@ async fn fetch_image_base64(url: String) -> Result<String, String> {
 
 #[cfg(target_os = "windows")]
 fn configure_webview2_startup() {
-    const EXTRA_ARGS_ENV: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
-    const REQUIRED_ARGS: &[&str] = &[
-        "--disable-gpu",
-        "--disable-gpu-compositing",
-    ];
-
-    let existing = std::env::var(EXTRA_ARGS_ENV).unwrap_or_default();
-    let mut args = existing
-        .split_whitespace()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    for required in REQUIRED_ARGS {
-        if !args.iter().any(|arg| arg == required) {
-            args.push((*required).to_string());
-        }
-    }
-
-    std::env::set_var(EXTRA_ARGS_ENV, args.join(" "));
+    // Intentionally a no-op.
+    //
+    // This previously injected "--disable-gpu" and "--disable-gpu-compositing"
+    // into WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, which forced WebView2 to render
+    // the ENTIRE UI in software (no GPU acceleration). That made every screen,
+    // scroll, transition, and animation sluggish regardless of content — the
+    // app-wide performance regression. It was a blunt workaround for a startup
+    // hang; the startup-recovery guards + splash timeout handle that instead, so
+    // hardware acceleration stays on for everyone.
+    //
+    // If non-GPU WebView2 flags are ever needed, set them here — but never
+    // re-disable the GPU.
 }
 
 #[cfg(not(target_os = "windows"))]
