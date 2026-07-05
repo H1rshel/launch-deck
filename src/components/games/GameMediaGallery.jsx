@@ -1,5 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Play, ChevronLeft, ChevronRight, X, Maximize2 } from 'lucide-react'
+
+// Render fullscreen lightboxes at the document root so they escape any ancestor
+// that establishes a containing block or clips overflow (e.g. `.ugd-section` uses
+// `content-visibility`/`contain`, which would otherwise trap `position: fixed`
+// inside the section box and crop the image).
+function Lightbox({ children }) {
+  if (typeof document === 'undefined') return children
+  return createPortal(children, document.body)
+}
 
 // ── Intelligent trailer selection (exported for potential reuse) ───────────────
 const TRAILER_PATTERNS = [
@@ -127,6 +137,7 @@ function VideoCarousel({ videos }) {
       </div>
 
       {lightbox !== null && (
+        <Lightbox>
         <div
           className="ugd-media__lightbox"
           onClick={() => setLightbox(null)}
@@ -183,6 +194,7 @@ function VideoCarousel({ videos }) {
             {lightbox + 1} / {videos.length}
           </span>
         </div>
+        </Lightbox>
       )}
     </>
   )
@@ -240,6 +252,7 @@ function MediaCarousel({ images }) {
       </div>
 
       {lightbox !== null && (
+        <Lightbox>
         <div
           className="ugd-media__lightbox"
           onClick={() => setLightbox(null)}
@@ -290,6 +303,7 @@ function MediaCarousel({ images }) {
             {lightbox + 1} / {images.length}
           </span>
         </div>
+        </Lightbox>
       )}
     </>
   )

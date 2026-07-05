@@ -32,6 +32,7 @@ export function useScanner() {
   // Single-game add flow
   const [pendingAddGame, setPendingAddGame] = useState(null) // { folderPath, exePath, detectedTitle }
   const [addingGame, setAddingGame] = useState(false)
+  const addSingleToken = useRef(0) // invalidates in-flight exe scans if the modal is closed/reopened
   const [pendingRestore, setPendingRestore] = useState(null) // { existingId, gameName, install_path, raw_file_name, raw_folder_name }
 
   const loadFolders = useCallback(async () => {
@@ -207,6 +208,12 @@ export function useScanner() {
       const folderName = folderPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || folderPath
       let detectedTitle = folderName
 
+      // Open the modal immediately in a loading state. Scanning the folder for
+      // executables (native PE inspection) can take a moment on big game folders,
+      // and without this the button click looked like it did nothing at all.
+      const token = ++addSingleToken.current
+      setPendingAddGame({ folderPath, exePath: null, exeOptions: [], detectedTitle, loading: true })
+
       // Find all plausible game exes in the chosen folder
       let exeOptions = []
       let resolvedExe = null
@@ -240,9 +247,12 @@ export function useScanner() {
         }
       }
 
-      setPendingAddGame({ folderPath, exePath: resolvedExe, exeOptions, detectedTitle })
+      // Bail if the user closed/reopened the modal while we were scanning.
+      if (addSingleToken.current !== token) return
+      setPendingAddGame({ folderPath, exePath: resolvedExe, exeOptions, detectedTitle, loading: false })
     } catch (err) {
       setError(err.message || String(err))
+      setPendingAddGame(null)
     }
   }, [])
 
@@ -428,6 +438,7 @@ export function useScanner() {
   }, [pendingRestore, refreshGames])
 
   const handleCancelAddSingleGame = useCallback(() => {
+    addSingleToken.current++ // invalidate any in-flight exe scan
     setPendingAddGame(null)
   }, [])
 

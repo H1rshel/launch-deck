@@ -18749,6 +18749,43 @@ h6 {
   transition-delay: 0ms !important;
 }
 
+/* When animations are disabled, also drop the GPU-heavy effects (blurred orbs,
+   large filter/backdrop-filter surfaces) so the launcher stays smooth on lower-end
+   hardware. Turning off "Animations" in Settings is a real performance mode. */
+.no-animations .animated-bg__orb,
+.no-animations .gs-panel__orb,
+.no-animations .gs-panel__scan-line {
+  display: none !important;
+}
+
+.no-animations .game-detail__hero-blur-bg,
+.no-animations .profile__hero-art,
+.no-animations .now-playing-bar__art-bg,
+.no-animations .console-mode__bg-blur {
+  filter: none !important;
+  opacity: 0.12 !important;
+}
+
+.no-animations .settings__section--glass,
+.no-animations .ugd-section--glass,
+.no-animations .cover-picker__backdrop,
+.no-animations .global-search__backdrop,
+.no-animations .game-detail__tag,
+.no-animations .game-detail__back,
+.no-animations .game-detail__cover-edit {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Honour the OS "reduce motion" preference the same way. */
+@media (prefers-reduced-motion: reduce) {
+  .animated-bg__orb,
+  .gs-panel__orb,
+  .gs-panel__scan-line {
+    animation: none !important;
+  }
+}
+
 .compact-mode .page--unified .page__content {
   padding: 14px 18px 22px;
   gap: 14px;

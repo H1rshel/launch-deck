@@ -1,5 +1,6 @@
 use pelite::pe64::{Pe, PeFile};
 use pelite::resources::version_info::VersionInfo;
+use pelite::FileMap;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -41,7 +42,10 @@ pub struct ScanProgress {
 // FILTER LISTS
 // ---------------------------------------------
 
-const MIN_FILE_SIZE: u64 = 3 * 1024 * 1024; // 3MB
+// Lowered from 3MB → 1MB: plenty of real (especially indie) games ship a main
+// executable in the 1–3MB range and were being dropped. Anything smaller is still
+// only admitted through the stub-launcher heuristic below.
+const MIN_FILE_SIZE: u64 = 1024 * 1024; // 1MB
 
 const SKIP_NAMES: &[&str] = &[
     // Uninstallers
@@ -194,11 +198,11 @@ const SKIP_FOLDERS: &[&str] = &[
     "dotnet",
     "physx",
     "xnafx",
-    // Misc non-game sub-folders
-    "content",
-    "launcher",
-    "support",
 ];
+// NOTE: folders like "content", "launcher" and "support" were intentionally
+// dropped from the prune list — some games keep their real executable inside
+// exactly those sub-folders, and pruning them caused a lot of games to be
+// missed. The exe name / size / PE-metadata filters still reject the junk.
 
 // Product-name keywords that identify a non-game Microsoft runtime/tool.
 // Applied when the PE CompanyName contains "microsoft".
@@ -266,8 +270,12 @@ fn extract_metadata(exe_path: &Path) -> Option<ExecutableMetadata> {
         return None;
     }
 
-    let file_data = fs::read(exe_path).ok()?;
-    let pe = PeFile::from_bytes(&file_data).ok()?;
+    // Memory-map instead of reading the whole executable into RAM. PE parsing only
+    // touches the header + resource section, so mapping is dramatically faster and
+    // lighter than `fs::read` — this is what kept large game folders (and the
+    // "Add Single Game" listing) feeling frozen.
+    let file_map = FileMap::open(exe_path).ok()?;
+    let pe = PeFile::from_bytes(file_map.as_ref()).ok()?;
     let resources = pe.resources().ok()?;
     let version_info = resources.version_info().ok()?;
 
@@ -430,9 +438,11 @@ fn collect_exe_paths(path: &str) -> Vec<PathBuf> {
         return results;
     }
 
-    // Fast pass to grab all exes in real-time
+    // Fast pass to grab all exes in real-time.
+    // Depth 10 (was 7) so deeply-nested layouts like
+    // <root>/<publisher>/<game>/<build>/Binaries/Win64/game.exe are still found.
     for entry in WalkDir::new(root)
-        .max_depth(7)
+        .max_depth(10)
         .into_iter()
         .filter_entry(|e| {
             // Never filter the root itself (depth 0) — the caller explicitly chose this folder.

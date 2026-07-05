@@ -7,8 +7,31 @@ use dotenv::dotenv;
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+/// When true, closing the main window hides it to the system tray instead of
+/// quitting. Kept in sync with the frontend "Close to tray" setting via
+/// `set_close_to_tray`.
+static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(false);
+
+/// Toggle the close-to-tray behaviour. Called from the frontend whenever the
+/// setting changes (and once on startup to restore the saved value).
+#[tauri::command]
+fn set_close_to_tray(enabled: bool) {
+    CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
+}
+
+/// Bring the main window back to the foreground (used by the tray icon/menu).
+fn show_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
 use tauri::Emitter;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
@@ -6966,7 +6989,57 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            // Intercept the close of the main window when "Close to tray" is on:
+            // hide it instead of quitting. This also covers the custom titlebar
+            // close button, which calls window.close() (→ CloseRequested).
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if CLOSE_TO_TRAY.load(Ordering::Relaxed) {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            }
+        })
         .setup(|app| {
+            // ── System tray ───────────────────────────────────────────────
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+                let show_item =
+                    MenuItem::with_id(app, "show", "Show Launch Deck", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+                let mut tray_builder = TrayIconBuilder::with_id("main-tray")
+                    .tooltip("Launch Deck")
+                    .menu(&tray_menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => show_main_window(app),
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            show_main_window(tray.app_handle());
+                        }
+                    });
+
+                if let Some(icon) = app.default_window_icon() {
+                    tray_builder = tray_builder.icon(icon.clone());
+                }
+
+                let _ = tray_builder.build(app);
+            }
+
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(12)).await;
@@ -6992,6 +7065,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             close_splashscreen,
+            set_close_to_tray,
             scan_for_exes,
             launch_game,
             get_game_data,

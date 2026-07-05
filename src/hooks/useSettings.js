@@ -2,11 +2,22 @@ import { useState, useEffect, useCallback } from 'react'
 
 const PREFIX = 'ld_setting_'
 
+const isTauri = typeof window !== 'undefined' && !!(window.__TAURI_INTERNALS__ || window.__TAURI__)
+
+// Push the close-to-tray preference down to the Rust window-close handler.
+function syncCloseToTray(enabled) {
+  if (!isTauri) return
+  import('@tauri-apps/api/core')
+    .then(({ invoke }) => invoke('set_close_to_tray', { enabled: !!enabled }))
+    .catch(() => {})
+}
+
 export const SETTING_DEFAULTS = {
   startupMode: 'normal',
   launchAtStartup: false,
   startMinimized: false,
   animationsEnabled: true,
+  closeToTray: false,
   compactMode: false,
   accentColor: 'cyan',
   defaultSort: 'name',
@@ -52,14 +63,9 @@ function applyEffects(settings) {
 }
 
 function loadAll() {
-  try {
-    const migrationKey = `${PREFIX}restoreAnimations_0_1_21`
-    if (localStorage.getItem(migrationKey) !== 'true') {
-      localStorage.setItem(PREFIX + 'animationsEnabled', JSON.stringify(true))
-      localStorage.setItem(migrationKey, 'true')
-    }
-  } catch {}
-
+  // NOTE: a previous build force-re-enabled animations on every launch, which
+  // overrode the user's choice and made the "Animations" performance toggle
+  // useless. The user's saved preference is now respected as-is.
   const out = {}
   for (const key of Object.keys(SETTING_DEFAULTS)) {
     out[key] = readSetting(key)
@@ -77,6 +83,11 @@ export function useSettings() {
   useEffect(() => {
     applyEffects(settings)
   }, [settings])
+
+  // Keep the native close-to-tray handler in sync (also restores it on startup).
+  useEffect(() => {
+    syncCloseToTray(settings.closeToTray)
+  }, [settings.closeToTray])
 
   const setSetting = useCallback((key, value) => {
     try {

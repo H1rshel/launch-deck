@@ -1306,6 +1306,11 @@ export default function Settings() {
               label="Start minimized"
               description="Open to the system tray instead of the main window"
             />
+            <WiredToggle
+              settingKey="closeToTray"
+              label="Close to tray"
+              description="Keep Launch Deck running in the system tray when you close the window"
+            />
           </div>
         </section>
 
@@ -1391,10 +1396,12 @@ export default function Settings() {
 
       {pendingAddGame && (
         <AddSingleGameModal
+          key={pendingAddGame.folderPath}
           folderPath={pendingAddGame.folderPath}
           exePath={pendingAddGame.exePath}
           exeOptions={pendingAddGame.exeOptions}
           initialTitle={pendingAddGame.detectedTitle}
+          loading={pendingAddGame.loading}
           onConfirm={confirmAddSingleGame}
           onClose={cancelAddSingleGame}
           adding={addingGame}

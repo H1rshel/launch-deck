@@ -1,6 +1,6 @@
 [package]
 name = "launch-deck"
-version = "0.1.27"
+version = "0.1.28"
 description = "A premium futuristic game launcher"
 authors = ["Launch Deck"]
 edition = "2021"
@@ -9,7 +9,7 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2.11", features = [] }
+tauri = { version = "2.11", features = ["tray-icon"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-deep-link = "2"

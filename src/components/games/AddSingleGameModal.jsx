@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { X, Search, Loader, FileCode2, ChevronDown, AlertTriangle, FolderOpen, Check } from 'lucide-react'
 import { searchGame } from '../../lib/rawg'
 
@@ -55,7 +55,7 @@ async function pickExeFile() {
   }
 }
 
-export default function AddSingleGameModal({ folderPath, exePath, exeOptions = [], initialTitle, onConfirm, onClose, adding }) {
+export default function AddSingleGameModal({ folderPath, exePath, exeOptions = [], initialTitle, onConfirm, onClose, adding, loading: scanningExes = false }) {
   const [query, setQuery] = useState(initialTitle || '')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
@@ -63,8 +63,16 @@ export default function AddSingleGameModal({ folderPath, exePath, exeOptions = [
   const [searchError, setSearchError] = useState(null)
   const [selectedExe, setSelectedExe] = useState(exePath || null)
   const [exeOpen, setExeOpen] = useState(false)
+  const userPickedExe = useRef(false)
+  const userEditedQuery = useRef(false)
 
-  const noExeFound = !selectedExe && exeOptions.length === 0
+  const noExeFound = !scanningExes && !selectedExe && exeOptions.length === 0
+
+  // Adopt the auto-detected exe once the folder scan resolves, unless the user
+  // has already made their own choice.
+  useEffect(() => {
+    if (exePath && !userPickedExe.current) setSelectedExe(exePath)
+  }, [exePath])
 
   const handleSearch = useCallback(async (overrideQuery) => {
     const term = (overrideQuery ?? query).trim()
@@ -86,6 +94,7 @@ export default function AddSingleGameModal({ folderPath, exePath, exeOptions = [
   const handleBrowse = useCallback(async () => {
     const exe = await pickExeFile()
     if (exe) {
+      userPickedExe.current = true
       setSelectedExe(exe)
       setExeOpen(false)
       const hint = basename(exe).replace(/\.exe$/i, '')
@@ -96,9 +105,14 @@ export default function AddSingleGameModal({ folderPath, exePath, exeOptions = [
     }
   }, [handleSearch])
 
+  // Search for the detected title on open, and again if it gets refined by the
+  // catalog lookup — unless the user has already edited the search box.
   useEffect(() => {
-    if (initialTitle) handleSearch(initialTitle)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (initialTitle && !userEditedQuery.current) {
+      setQuery(initialTitle)
+      handleSearch(initialTitle)
+    }
+  }, [initialTitle]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="cover-picker__backdrop" onClick={adding ? undefined : onClose}>
@@ -113,7 +127,15 @@ export default function AddSingleGameModal({ folderPath, exePath, exeOptions = [
         </div>
 
         {/* ── Exe selector ───────────────────────────────────── */}
-        {noExeFound ? (
+        {scanningExes ? (
+          /* Still scanning the folder for executables */
+          <div className="add-game__exe-section">
+            <div className="add-game__exe-toggle" style={{ cursor: 'default' }}>
+              <Loader size={13} className="settings__spinner add-game__exe-toggle-icon" />
+              <span className="add-game__exe-toggle-name">Scanning folder for executables…</span>
+            </div>
+          </div>
+        ) : noExeFound ? (
           /* Error state — no exe detected */
           <div className="add-game__exe-error">
             <div className="add-game__exe-error-header">
@@ -144,7 +166,7 @@ export default function AddSingleGameModal({ folderPath, exePath, exeOptions = [
                   <button
                     key={exe}
                     className={`add-game__exe-item${exe === selectedExe ? ' add-game__exe-item--active' : ''}`}
-                    onClick={() => { setSelectedExe(exe); setExeOpen(false) }}
+                    onClick={() => { userPickedExe.current = true; setSelectedExe(exe); setExeOpen(false) }}
                   >
                     <div className="add-game__exe-item-check">
                       {exe === selectedExe && <Check size={11} />}
@@ -175,7 +197,7 @@ export default function AddSingleGameModal({ folderPath, exePath, exeOptions = [
               <input
                 className="cover-picker__input"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => { userEditedQuery.current = true; setQuery(e.target.value) }}
                 placeholder="Search game title..."
                 onKeyDown={(e) => e.key === 'Enter' && !adding && handleSearch()}
                 autoFocus
