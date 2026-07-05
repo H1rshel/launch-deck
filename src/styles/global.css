@@ -2505,7 +2505,12 @@ h6 {
   overflow: hidden;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  transition: all var(--transition);
+  /* Only animate what actually changes on hover — `transition: all` forced the
+     compositor to watch every property and hurt scroll/hover smoothness. */
+  transition:
+    transform var(--transition),
+    box-shadow var(--transition),
+    border-color var(--transition);
   animation: card-enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
   cursor: pointer;
   position: relative;

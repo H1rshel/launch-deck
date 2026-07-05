@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Play, Download, Star, Trash2, Heart, X } from 'lucide-react'
 import { useGameContext } from '../../context/GameContext'
@@ -14,7 +15,7 @@ function formatDate(dateStr) {
   return `${day}/${month}/${year}`
 }
 
-export default function GameCard({ game, onRemove, onClearFranchise, isExiting }) {
+function GameCard({ game, onRemove, onClearFranchise, isExiting }) {
   const navigate = useNavigate()
   const { playGame, toggleFavorite, installGame } = useGameContext()
   const { cover, hero } = getGameImages(game)
@@ -133,3 +134,9 @@ export default function GameCard({ game, onRemove, onClearFranchise, isExiting }
     </div>
   )
 }
+
+// Memoised: the dashboard/library re-render on every search keystroke, filter,
+// and context update. Without this, every card in the library re-rendered each
+// time (hundreds of SVG icons) — the main source of typing/scroll jank. Cards
+// now only re-render when their own game data or exit state changes.
+export default memo(GameCard)

@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { Loader } from 'lucide-react'
 import GameCard from './GameCard'
 
-export default function GameGrid({ games, title, onRemoveGame, onClearFranchise, loading }) {
+export default function GameGrid({ games, title, onRemoveGame, onClearFranchise, loading, emptyMessage }) {
   const [exitingIds, setExitingIds] = useState(new Set())
 
   const handleRemove = useCallback((id) => {
@@ -37,7 +37,7 @@ export default function GameGrid({ games, title, onRemoveGame, onClearFranchise,
           <p>Loading your library...</p>
         </div>
       ) : games.length === 0 && (
-        <p className="game-grid__empty">No games found.</p>
+        <p className="game-grid__empty">{emptyMessage || 'No games found.'}</p>
       )}
     </section>
   )
