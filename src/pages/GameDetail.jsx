@@ -45,6 +45,7 @@ import {
 } from "../hooks/useGameDetailData"
 import { useOnlineStatus } from "../hooks/useOnlineStatus"
 import { useVisibility } from "../hooks/useVisibility"
+import { useTabIndicator } from "../hooks/useTabIndicator"
 import {
   Play,
   Square,
@@ -264,6 +265,7 @@ function ImagePicker({ game, onApply, onClose }) {
     setTimeout(onClose, 210)
   }
   const [activeTab, setActiveTab] = useState("cover") // cover | hero | logo
+  const { tabRef: coverTabRef, indicatorStyle: coverIndicatorStyle } = useTabIndicator(activeTab)
 
   // Track staged changes before applying
   const [stagedImages, setStagedImages] = useState({
@@ -288,6 +290,7 @@ function ImagePicker({ game, onApply, onClose }) {
   // Resolved natural resolutions for hero images
   const [resolutions, setResolutions] = useState({})
   const [resolutionFilter, setResolutionFilter] = useState("all")
+  const { tabRef: resTabRef, indicatorStyle: resIndicatorStyle } = useTabIndicator(resolutionFilter)
 
   // Has anything been changed from original?
   const hasChanges =
@@ -459,11 +462,13 @@ function ImagePicker({ game, onApply, onClose }) {
           </button>
         </div>
 
-        <div className="cover-picker__tabs">
+        <div className="cover-picker__tabs" ref={coverTabRef}>
+          <span className="tab-slider" style={coverIndicatorStyle} aria-hidden="true" />
           {["cover", "hero", "logo"].map((tab) => (
             <button
               key={tab}
               className={`cover-picker__tab ${activeTab === tab ? "cover-picker__tab--active" : ""}`}
+              data-tab-active={activeTab === tab ? "true" : undefined}
               onClick={() => {
                 setActiveTab(tab)
                 setResults([])
@@ -512,8 +517,9 @@ function ImagePicker({ game, onApply, onClose }) {
         </div>
 
         {(activeTab === "hero" || source === "web") && results.length > 0 && (
-          <div className="cover-picker__res-filter">
+          <div className="cover-picker__res-filter" ref={resTabRef}>
             <span className="cover-picker__res-filter-label">Resolution:</span>
+            <span className="tab-slider" style={resIndicatorStyle} aria-hidden="true" />
             {[
               { label: "All", value: "all" },
               { label: "HD+", value: "hd", title: "≥1920px wide" },
@@ -522,6 +528,7 @@ function ImagePicker({ game, onApply, onClose }) {
               <button
                 key={opt.value}
                 className={`cover-picker__res-filter-btn${resolutionFilter === opt.value ? " cover-picker__res-filter-btn--active" : ""}`}
+                data-tab-active={resolutionFilter === opt.value ? "true" : undefined}
                 onClick={() => setResolutionFilter(opt.value)}
                 title={opt.title}
               >

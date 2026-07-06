@@ -13,7 +13,7 @@ export default function DiscoverTabs({ active, onChange, counts = {}, size = 'md
   const { tabRef, indicatorStyle } = useTabIndicator(active)
   return (
     <div ref={tabRef} className={`upcoming-tabs upcoming-tabs--${size}`} role="tablist">
-      <span className="upcoming-tabs__slider" style={indicatorStyle} aria-hidden="true" />
+      <span className="tab-slider" style={indicatorStyle} aria-hidden="true" />
       {DISCOVER_TABS.map(({ id, label, Icon }) => {
         const isActive = id === active
         const count = counts[id]

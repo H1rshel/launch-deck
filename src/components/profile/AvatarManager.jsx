@@ -3,6 +3,7 @@ import { X, Upload, Search, Undo2, Loader, Image as ImageIcon, Gamepad2 } from '
 import { searchWebImages } from '../../lib/rawg'
 import { useAuth } from '../../context/AuthContext'
 import { useProfileAvatar } from '../../hooks/useProfileAvatar'
+import { useTabIndicator } from '../../hooks/useTabIndicator'
 import { AVATAR_SOURCE } from '../../lib/avatarConstants'
 import { invoke } from '@tauri-apps/api/core'
 import ImageCropper from '../ui/ImageCropper'
@@ -15,6 +16,7 @@ export default function AvatarManager({ isOpen, onClose }) {
   const { applyCustomAvatar, revertToGoogleAvatar, isUpdating } = useProfileAvatar()
 
   const [activeTab, setActiveTab] = useState('upload')
+  const { tabRef: avatarTabRef, indicatorStyle: avatarIndicatorStyle } = useTabIndicator(activeTab)
   const [stagedImage, setStagedImage] = useState(null)
   const [isClosing, setIsClosing] = useState(false)
   
@@ -148,27 +150,32 @@ export default function AvatarManager({ isOpen, onClose }) {
           </div>
         ) : (
           <>
-            <div className="avatar-manager__tabs">
-              <button 
+            <div className="avatar-manager__tabs" ref={avatarTabRef}>
+              <span className="tab-slider" style={avatarIndicatorStyle} aria-hidden="true" />
+              <button
                 className={`avatar-manager__tab ${activeTab === 'upload' ? 'avatar-manager__tab--active' : ''}`}
+                data-tab-active={activeTab === 'upload' ? 'true' : undefined}
                 onClick={() => setActiveTab('upload')}
               >
                 <Upload size={16} /> Upload
               </button>
-              <button 
+              <button
                 className={`avatar-manager__tab ${activeTab === 'search' ? 'avatar-manager__tab--active' : ''}`}
+                data-tab-active={activeTab === 'search' ? 'true' : undefined}
                 onClick={() => setActiveTab('search')}
               >
                 <Search size={16} /> Search
               </button>
-              <button 
+              <button
                 className={`avatar-manager__tab ${activeTab === 'platforms' ? 'avatar-manager__tab--active' : ''}`}
+                data-tab-active={activeTab === 'platforms' ? 'true' : undefined}
                 onClick={() => setActiveTab('platforms')}
               >
                 <Gamepad2 size={16} /> Platforms
               </button>
-              <button 
+              <button
                 className={`avatar-manager__tab ${activeTab === 'google' ? 'avatar-manager__tab--active' : ''}`}
+                data-tab-active={activeTab === 'google' ? 'true' : undefined}
                 onClick={() => setActiveTab('google')}
               >
                 <Undo2 size={16} /> Google Default

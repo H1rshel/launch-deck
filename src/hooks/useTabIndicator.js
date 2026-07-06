@@ -27,11 +27,19 @@ export function useTabIndicator(activeValue, signature = '') {
       setIndicatorStyle((s) => ({ ...s, opacity: 0 }))
       return
     }
+    // Match the active tab's rounding so one shared slider fits every tab bar.
+    let borderRadius
+    try {
+      borderRadius = getComputedStyle(active).borderRadius
+    } catch {
+      borderRadius = undefined
+    }
     setIndicatorStyle({
       opacity: 1,
       transform: `translate(${active.offsetLeft}px, ${active.offsetTop}px)`,
       width: `${active.offsetWidth}px`,
       height: `${active.offsetHeight}px`,
+      borderRadius,
     })
   }, [])
 

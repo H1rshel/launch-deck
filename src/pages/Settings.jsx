@@ -15,6 +15,7 @@ import TopBar from "../components/layout/TopBar"
 import PageHeader from "../components/layout/PageHeader"
 import { useAuth } from "../hooks/useAuth"
 import { useScanner } from "../hooks/useScanner"
+import { useTabIndicator } from "../hooks/useTabIndicator"
 import { useSettingsContext } from "../context/SettingsContext"
 import { useNotifications } from "../context/NotificationContext"
 import ScanResultsModal from "../components/games/ScanResultsModal"
@@ -153,6 +154,7 @@ function AccentColorPicker() {
 
 function StartupModeRow() {
   const { settings, setSetting } = useSettingsContext()
+  const { tabRef, indicatorStyle } = useTabIndicator(settings.startupMode)
   return (
     <div className="setting-row">
       <div className="setting-row__info">
@@ -161,9 +163,11 @@ function StartupModeRow() {
           How Launch Deck opens each time you launch it
         </span>
       </div>
-      <div className="setting-segmented">
+      <div className="setting-segmented" ref={tabRef}>
+        <span className="tab-slider" style={indicatorStyle} aria-hidden="true" />
         <button
           className={`setting-segmented__btn ${settings.startupMode === "normal" ? "setting-segmented__btn--active" : ""}`}
+          data-tab-active={settings.startupMode === "normal" ? "true" : undefined}
           onClick={() => setSetting("startupMode", "normal")}
         >
           <Monitor size={13} />
@@ -171,6 +175,7 @@ function StartupModeRow() {
         </button>
         <button
           className={`setting-segmented__btn ${settings.startupMode === "console" ? "setting-segmented__btn--active" : ""}`}
+          data-tab-active={settings.startupMode === "console" ? "true" : undefined}
           onClick={() => setSetting("startupMode", "console")}
         >
           <Gamepad2 size={13} />

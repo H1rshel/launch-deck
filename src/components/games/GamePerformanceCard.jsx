@@ -20,6 +20,7 @@ import {
   Settings2,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useTabIndicator } from '../../hooks/useTabIndicator'
 
 const TIER_COLORS = {
   purple: '#a855f7',
@@ -68,6 +69,7 @@ export default function GamePerformanceCard({ game }) {
   const { score, loading } = useMyRig()
   const navigate = useNavigate()
   const [activeRes, setActiveRes] = useState(null)
+  const { tabRef: resTabRef, indicatorStyle: resIndicatorStyle } = useTabIndicator(activeRes)
 
   const analysis = useMemo(() => {
     if (!score || !game) return null
@@ -147,11 +149,13 @@ export default function GamePerformanceCard({ game }) {
       </div>
 
       {/* Resolution toggle */}
-      <div className="gpc__res-toggle">
+      <div className="gpc__res-toggle" ref={resTabRef}>
+        <span className="tab-slider" style={resIndicatorStyle} aria-hidden="true" />
         {RES_KEYS.map((key) => (
           <button
             key={key}
             className={`gpc__res-toggle-btn${activeRes === key ? ' gpc__res-toggle-btn--active' : ''}`}
+            data-tab-active={activeRes === key ? 'true' : undefined}
             onClick={() => setActiveRes(activeRes === key ? null : key)}
           >
             {key}

@@ -15,6 +15,7 @@ import {
 import { useGameContext } from "../context/GameContext"
 import { getGameImages } from "../utils/imageHandler"
 import { getAllSessions } from "../lib/db"
+import { useTabIndicator } from "../hooks/useTabIndicator"
 
 function formatDate(dateString) {
   if (!dateString) return ""
@@ -63,6 +64,7 @@ export default function Activity() {
   const navigate = useNavigate()
   const [sessions, setSessions] = useState([])
   const [activePeriod, setActivePeriod] = useState("week")
+  const { tabRef: periodTabRef, indicatorStyle: periodIndicatorStyle } = useTabIndicator(activePeriod)
 
   useEffect(() => {
     getAllSessions()
@@ -289,11 +291,13 @@ export default function Activity() {
               <Trophy size={14} className="activity__section-icon" />
               <h2 className="activity__section-title">Most Played</h2>
             </div>
-            <div className="activity__period-tabs">
+            <div className="activity__period-tabs" ref={periodTabRef}>
+              <span className="tab-slider" style={periodIndicatorStyle} aria-hidden="true" />
               {PERIODS.map((p) => (
                 <button
                   key={p.key}
                   className={`activity__period-tab${activePeriod === p.key ? " activity__period-tab--active" : ""}`}
+                  data-tab-active={activePeriod === p.key ? "true" : undefined}
                   onClick={() => setActivePeriod(p.key)}
                 >
                   {p.label}

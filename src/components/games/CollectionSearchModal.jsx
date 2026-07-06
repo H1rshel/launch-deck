@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { Search, X, Loader, Layers, Check } from 'lucide-react'
+import { useTabIndicator } from '../../hooks/useTabIndicator'
 
 const isTauri = typeof window !== 'undefined' && !!(window.__TAURI_INTERNALS__ || window.__TAURI__)
 
@@ -21,6 +22,7 @@ export default function CollectionSearchModal({ open, onClose, onSelect, title, 
   const [results, setResults] = useState([]) // unique collection names extracted from IGDB results
   const [customName, setCustomName] = useState('')
   const [mode, setMode] = useState('search') // 'search' | 'existing' | 'custom'
+  const { tabRef: modeTabRef, indicatorStyle: modeIndicatorStyle } = useTabIndicator(mode, String(existingCollections.length > 0))
   const [existingFilter, setExistingFilter] = useState('')
   const inputRef = useRef(null)
   const debounceRef = useRef(null)
@@ -87,9 +89,11 @@ export default function CollectionSearchModal({ open, onClose, onSelect, title, 
         </div>
 
         {/* Mode tabs */}
-        <div className="collection-modal__tabs">
+        <div className="collection-modal__tabs" ref={modeTabRef}>
+          <span className="tab-slider" style={modeIndicatorStyle} aria-hidden="true" />
           <button
             className={`collection-modal__tab${mode === 'search' ? ' collection-modal__tab--active' : ''}`}
+            data-tab-active={mode === 'search' ? 'true' : undefined}
             onClick={() => setMode('search')}
           >
             <Search size={12} /> IGDB Search
@@ -97,6 +101,7 @@ export default function CollectionSearchModal({ open, onClose, onSelect, title, 
           {existingCollections.length > 0 && (
             <button
               className={`collection-modal__tab${mode === 'existing' ? ' collection-modal__tab--active' : ''}`}
+              data-tab-active={mode === 'existing' ? 'true' : undefined}
               onClick={() => setMode('existing')}
             >
               <Layers size={12} /> Existing
@@ -104,6 +109,7 @@ export default function CollectionSearchModal({ open, onClose, onSelect, title, 
           )}
           <button
             className={`collection-modal__tab${mode === 'custom' ? ' collection-modal__tab--active' : ''}`}
+            data-tab-active={mode === 'custom' ? 'true' : undefined}
             onClick={() => setMode('custom')}
           >
             Custom

@@ -2964,14 +2964,18 @@ h6 {
 
 .library__filters {
   display: flex;
-  gap: 8px;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(10, 15, 28, 0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 .library__filter-btn {
   padding: 8px 16px;
   border-radius: var(--radius-md);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--text-secondary);
   font-family: var(--font-heading);
   font-size: 13px;
@@ -14682,6 +14686,48 @@ h6 {
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────── */
+/* ── Universal sliding active-tab indicator ───────────────────────────────
+   A single .tab-slider pill glides to the active tab in ANY tab bar. A bar only
+   needs a <span class="tab-slider"> as its first child and data-tab-active="true"
+   on the active button (driven by useTabIndicator). No per-bar CSS needed. */
+:has(> .tab-slider) {
+  position: relative;
+}
+
+.tab-slider {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  border-radius: 10px;
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.42);
+  box-shadow:
+    0 0 10px rgba(0, 212, 255, 0.15),
+    inset 0 1px 0 rgba(0, 212, 255, 0.2);
+  pointer-events: none;
+  transition:
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.2s ease,
+    opacity 0.2s ease,
+    border-radius 0.2s ease;
+}
+
+/* Lift the tab buttons above the sliding pill. */
+.tab-slider ~ * {
+  position: relative;
+  z-index: 1;
+}
+
+/* The active tab's own fill is replaced by the sliding pill; keep only text
+   colour (each bar's --active class sets that). */
+[data-tab-active="true"] {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
 .upcoming-tabs {
   display: inline-flex;
   align-items: center;
@@ -14696,26 +14742,6 @@ h6 {
     inset 0 1px 8px rgba(0, 0, 0, 0.25),
     0 1px 0 rgba(255, 255, 255, 0.03);
   width: fit-content;
-}
-
-/* Sliding active-tab indicator — glides between tabs on switch. */
-.upcoming-tabs__slider {
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: 0;
-  border-radius: 10px;
-  background: rgba(0, 212, 255, 0.1);
-  border: 1px solid rgba(0, 212, 255, 0.45);
-  box-shadow:
-    0 0 10px rgba(0, 212, 255, 0.15),
-    inset 0 1px 0 rgba(0, 212, 255, 0.2);
-  pointer-events: none;
-  transition:
-    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    height 0.2s ease,
-    opacity 0.2s ease;
 }
 
 .upcoming-tabs__btn {

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { Search, X, Loader2, Gamepad2, BookOpen, Globe2, Clock } from 'lucide-react'
 import { useGameSearch } from '../../hooks/useGameSearch'
+import { useTabIndicator } from '../../hooks/useTabIndicator'
 import { useGameContext } from '../../context/GameContext'
 
 const PLATFORM_ABBREV = {
@@ -142,6 +143,7 @@ function LibraryResultItem({ game, onSelect, index }) {
 export default function GlobalSearchPopover({ isOpen, onClose }) {
   const [query, setQuery] = useState('')
   const [searchMode, setSearchMode] = useState('global')
+  const { tabRef: modeTabRef, indicatorStyle: modeIndicatorStyle } = useTabIndicator(searchMode)
   const inputRef = useRef(null)
   const navigate = useNavigate()
   const trimmed = query.trim()
@@ -261,9 +263,11 @@ export default function GlobalSearchPopover({ isOpen, onClose }) {
         </div>
 
         {/* ── Mode toggle ── */}
-        <div className="gs-panel__mode-toggle">
+        <div className="gs-panel__mode-toggle" ref={modeTabRef}>
+          <span className="tab-slider" style={modeIndicatorStyle} aria-hidden="true" />
           <button
             className={`gs-mode-btn${searchMode === 'library' ? ' gs-mode-btn--active' : ''}`}
+            data-tab-active={searchMode === 'library' ? 'true' : undefined}
             onClick={() => setSearchMode('library')}
           >
             <BookOpen size={12} strokeWidth={2} />
@@ -271,6 +275,7 @@ export default function GlobalSearchPopover({ isOpen, onClose }) {
           </button>
           <button
             className={`gs-mode-btn${searchMode === 'global' ? ' gs-mode-btn--active' : ''}`}
+            data-tab-active={searchMode === 'global' ? 'true' : undefined}
             onClick={() => setSearchMode('global')}
           >
             <Globe2 size={12} strokeWidth={2} />

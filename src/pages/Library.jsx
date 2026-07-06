@@ -5,6 +5,7 @@ import GameGrid from "../components/games/GameGrid"
 import CompactGameCard from "../components/games/CompactGameCard"
 import CollectionSearchModal from "../components/games/CollectionSearchModal"
 import { useGames } from "../hooks/useGames"
+import { useTabIndicator } from "../hooks/useTabIndicator"
 import { useGameContext } from "../context/GameContext"
 import { getGameImages } from "../utils/imageHandler"
 import {
@@ -432,6 +433,7 @@ export default function Library() {
     searchQuery,
     setSearchQuery,
   } = useGames()
+  const { tabRef: filterTabRef, indicatorStyle: filterIndicatorStyle } = useTabIndicator(filter)
   const {
     removeGame,
     syncLibrary,
@@ -474,13 +476,15 @@ export default function Library() {
       />
       <div className="page__content">
         <div className="glass-panel library__toolbar">
-          <div className="library__toolbar-group library__filters">
+          <div className="library__toolbar-group library__filters" ref={filterTabRef}>
+            <span className="tab-slider" style={filterIndicatorStyle} aria-hidden="true" />
             {filters.map((f) => (
               <button
                 key={f.key}
                 className={`library__filter-btn ${
                   filter === f.key ? "library__filter-btn--active" : ""
                 }`}
+                data-tab-active={filter === f.key ? "true" : undefined}
                 onClick={() => setFilter(f.key)}
               >
                 {f.label}
