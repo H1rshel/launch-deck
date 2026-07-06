@@ -19022,10 +19022,11 @@ h6 {
 /* Segmented control (used by Startup mode) */
 .setting-segmented {
   display: flex;
+  gap: 4px;
+  padding: 4px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
+  border-radius: var(--radius-md);
 }
 
 .setting-segmented__btn {
@@ -19035,6 +19036,7 @@ h6 {
   padding: 7px 14px;
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 12px;
   font-family: var(--font-body);
@@ -19044,10 +19046,6 @@ h6 {
   transition:
     background 0.2s ease,
     color 0.2s ease;
-}
-
-.setting-segmented__btn + .setting-segmented__btn {
-  border-left: 1px solid var(--border);
 }
 
 .setting-segmented__btn:hover:not(.setting-segmented__btn--active) {
