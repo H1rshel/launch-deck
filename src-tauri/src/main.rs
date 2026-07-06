@@ -6955,18 +6955,18 @@ async fn fetch_image_base64(url: String) -> Result<String, String> {
 
 #[cfg(target_os = "windows")]
 fn configure_webview2_startup() {
-    // Intentionally a no-op.
+    // Intentionally a no-op — restores the pre-regression default (WebView2 uses
+    // normal hardware acceleration).
     //
-    // This previously injected "--disable-gpu" and "--disable-gpu-compositing"
-    // into WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, which forced WebView2 to render
-    // the ENTIRE UI in software (no GPU acceleration). That made every screen,
-    // scroll, transition, and animation sluggish regardless of content — the
-    // app-wide performance regression. It was a blunt workaround for a startup
-    // hang; the startup-recovery guards + splash timeout handle that instead, so
-    // hardware acceleration stays on for everyone.
+    // This function used to inject "--disable-gpu"/"--disable-gpu-compositing",
+    // which rendered the ENTIRE UI in software and made the whole app sluggish on
+    // every screen. That was a blunt workaround for a slow-startup "blank screen"
+    // — but the blank was React taking a long time to mount, not a GPU failure,
+    // so the real fix is faster startup (see GameContext init), not killing the
+    // GPU. Do NOT re-add GPU-disabling flags here.
     //
-    // If non-GPU WebView2 flags are ever needed, set them here — but never
-    // re-disable the GPU.
+    // A user can still override rendering via the WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+    // environment variable if a specific driver ever needs it.
 }
 
 #[cfg(not(target_os = "windows"))]

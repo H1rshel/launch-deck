@@ -419,35 +419,39 @@ export function GameProvider({ children }) {
     let mounted = true;
 
     async function init() {
+      // Fetch session directly to bypass hook timing dependencies
+      let session = null;
       try {
-        // Fetch session directly to bypass hook timing dependencies
-        const {
+        ({
           data: { session },
-        } = await supabase.auth.getSession();
+        } = await supabase.auth.getSession());
+      } catch (err) {
+        console.warn("getSession failed:", err);
+      }
 
-        // Preload the Dashboard's default "For You" feed concurrently with DB
-        // init.  Promise.allSettled waits for both, so the Dashboard renders
-        // with cached data instead of showing skeletons.  Background feeds
-        // (other tabs) start in parallel inside preloadUpcomingFeeds and
-        // continue after this resolves.
-        await Promise.allSettled([
-          (async () => {
-            await initDb();
-            const rows = await getAllGames();
-            if (mounted) {
-              setGames(rows);
-              setError(null);
-            }
-          })(),
-          session?.user?.id
-            ? preloadUpcomingFeeds(session.user.id, "for_you")
-            : Promise.resolve(),
-        ]);
+      // Readiness is gated ONLY on the local database (fast, on-disk SQLite).
+      // First paint must never wait on the network.
+      try {
+        await initDb();
+        const rows = await getAllGames();
+        if (mounted) {
+          setGames(rows);
+          setError(null);
+        }
       } catch (err) {
         console.error("Initialization failed:", err);
         if (mounted) setError(err.message);
       } finally {
         if (mounted) setLoading(false);
+      }
+
+      // Preload the Dashboard's upcoming feed in the BACKGROUND. This is a
+      // Supabase edge-function round-trip — previously it was awaited before the
+      // app was marked ready, so the splash/first paint hung on the network
+      // (and edge cold-starts). The Upcoming section renders its own skeleton
+      // and fetches independently, so this is purely an optimisation.
+      if (mounted && session?.user?.id) {
+        preloadUpcomingFeeds(session.user.id, "for_you").catch(() => {});
       }
 
       // Run first sync after DB is ready (non-blocking)
