@@ -1,21 +1,24 @@
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import AppLayout from './components/layout/AppLayout'
 import Login from './pages/Login'
-import AuthCallback from './pages/AuthCallback'
 import Dashboard from './pages/Dashboard'
-import Library from './pages/Library'
-import Activity from './pages/Activity'
-import Profile from './pages/Profile'
-import Settings from './pages/Settings'
-import GameDetail from './pages/GameDetail'
-import MyRig from './pages/MyRig'
-import ConsoleMode from './pages/ConsoleMode'
-import UpcomingReleases from './pages/UpcomingReleases'
-import UpcomingGameDetail from './pages/UpcomingGameDetail'
-import Discover from './pages/Discover'
+// Heavy / non-initial routes are code-split so they aren't parsed at startup —
+// this keeps the initial JS bundle small and first paint fast. Login + Dashboard
+// stay eager because they're the first screen the user lands on.
+const AuthCallback = lazy(() => import('./pages/AuthCallback'))
+const Library = lazy(() => import('./pages/Library'))
+const Activity = lazy(() => import('./pages/Activity'))
+const Profile = lazy(() => import('./pages/Profile'))
+const Settings = lazy(() => import('./pages/Settings'))
+const GameDetail = lazy(() => import('./pages/GameDetail'))
+const MyRig = lazy(() => import('./pages/MyRig'))
+const ConsoleMode = lazy(() => import('./pages/ConsoleMode'))
+const UpcomingReleases = lazy(() => import('./pages/UpcomingReleases'))
+const UpcomingGameDetail = lazy(() => import('./pages/UpcomingGameDetail'))
+const Discover = lazy(() => import('./pages/Discover'))
 import { useAuth } from './context/AuthContext'
 import { useGameContext } from './context/GameContext'
 import { preloadUpcomingFeeds } from './hooks/useUpcomingGames'
@@ -146,6 +149,7 @@ export default function App() {
   }, [isLoading, user, addNotification]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
+    <Suspense fallback={<div className="loading-screen"><div className="loading-spinner" /></div>}>
     <Routes>
       <Route path="/login" element={<Login />} />
       {/* Browser/dev OAuth callback — exchanges the PKCE code for a session */}
@@ -178,5 +182,6 @@ export default function App() {
       />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
+    </Suspense>
   )
 }

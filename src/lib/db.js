@@ -94,10 +94,28 @@ async function getDb() {
   return db
 }
 
+// Bump this whenever a new CREATE/ALTER is added below, so the one-time
+// migration runs once more and then the fast path resumes.
+const SCHEMA_VERSION = 1
+
 // Ensures tables exist before any query — safe to call multiple times
 async function ensureTablesExist() {
   if (dbReady) return
   const conn = await getDb()
+
+  // Fast path: on a normal launch the schema is already current, so skip the
+  // ~45 sequential CREATE/ALTER IPC round-trips (a real chunk of startup time)
+  // and just verify the recorded schema version.
+  try {
+    const rows = await conn.select('PRAGMA user_version')
+    const version = Number(rows?.[0]?.user_version ?? 0)
+    if (version >= SCHEMA_VERSION) {
+      dbReady = true
+      return
+    }
+  } catch (_) {
+    // Couldn't read the pragma — fall through and run the full (idempotent) init.
+  }
 
   await conn.execute(`
     CREATE TABLE IF NOT EXISTS games (
@@ -263,6 +281,11 @@ async function ensureTablesExist() {
   // We no longer cache failures, so stale rows would block fresh fetches.
   try {
     await conn.execute("DELETE FROM hltb_cache WHERE available = 0")
+  } catch (_) {}
+
+  // Record the schema version so subsequent launches take the fast path above.
+  try {
+    await conn.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`)
   } catch (_) {}
 
   dbReady = true
