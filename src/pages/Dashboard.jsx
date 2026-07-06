@@ -16,6 +16,12 @@ export default function Dashboard() {
     .sort((a, b) => new Date(b.lastPlayed || 0) - new Date(a.lastPlayed || 0))
     .slice(0, 4)
 
+  // Most-recently-added games (created_at is an ISO timestamp → lexical sort).
+  const latestAdded = [...games]
+    .filter((g) => g.created_at)
+    .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+    .slice(0, 6)
+
   return (
     <div className="page dashboard">
       <TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} />
@@ -34,6 +40,9 @@ export default function Dashboard() {
           <>
             <FeaturedHero game={featuredGame} />
             <GameGrid games={recentGames} title="Recently Played" onRemoveGame={removeGame} loading={loading} />
+            {latestAdded.length > 0 && (
+              <GameGrid games={latestAdded} title="Latest Added" onRemoveGame={removeGame} />
+            )}
             <UpcomingSection />
             <GameGrid games={games} title="Your Library" onRemoveGame={removeGame} loading={loading} />
           </>

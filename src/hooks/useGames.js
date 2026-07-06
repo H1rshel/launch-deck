@@ -8,6 +8,8 @@ const SORT_FNS = {
   rating: (a, b) => (b.rating || 0) - (a.rating || 0),
   recent: (a, b) => new Date(b.lastPlayed || 0) - new Date(a.lastPlayed || 0),
   release: (a, b) => (b.release_date || '').localeCompare(a.release_date || ''),
+  // Latest added first — created_at is an ISO timestamp so lexical compare works.
+  added: (a, b) => (b.created_at || '').localeCompare(a.created_at || ''),
 }
 
 export function useGames() {

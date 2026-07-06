@@ -30,6 +30,7 @@ const filters = [
 
 const sorts = [
   { key: "name", label: "Name" },
+  { key: "added", label: "Latest Added" },
   { key: "rating", label: "Rating" },
   { key: "recent", label: "Last Played" },
   { key: "release", label: "Release Date" },

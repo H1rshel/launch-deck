@@ -183,6 +183,7 @@ function StartupModeRow() {
 
 const SORT_OPTIONS = [
   { value: "name",    label: "Name (A–Z)" },
+  { value: "added",   label: "Latest Added" },
   { value: "recent",  label: "Recently Played" },
   { value: "rating",  label: "Rating" },
   { value: "release", label: "Release Date" },

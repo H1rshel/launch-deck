@@ -96,7 +96,7 @@ async function getDb() {
 
 // Bump this whenever a new CREATE/ALTER is added below, so the one-time
 // migration runs once more and then the fast path resumes.
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 // Ensures tables exist before any query — safe to call multiple times
 async function ensureTablesExist() {
@@ -155,7 +155,8 @@ async function ensureTablesExist() {
       publishers TEXT DEFAULT '',
       collections TEXT DEFAULT '',
       franchises TEXT DEFAULT '',
-      is_new INTEGER DEFAULT 0
+      is_new INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT ''
     )
   `)
 
@@ -190,6 +191,7 @@ async function ensureTablesExist() {
     'ALTER TABLE games ADD COLUMN themes TEXT DEFAULT ""',
     'ALTER TABLE games ADD COLUMN developers TEXT DEFAULT ""',
     'ALTER TABLE games ADD COLUMN publishers TEXT DEFAULT ""',
+    'ALTER TABLE games ADD COLUMN created_at TEXT DEFAULT ""',
   ]
   for (const sql of migrations) {
     try {
@@ -198,6 +200,21 @@ async function ensureTablesExist() {
       /* column already exists */
     }
   }
+
+  // Backfill created_at (date added) for rows from before this column existed.
+  // We don't have the true add-date, so approximate with updated_at (and fall
+  // back to last_played) so "Latest Added" ordering is still meaningful.
+  try {
+    await conn.execute(
+      `UPDATE games
+         SET created_at = CASE
+           WHEN updated_at IS NOT NULL AND updated_at != '' THEN updated_at
+           WHEN last_played IS NOT NULL AND last_played != '' THEN last_played
+           ELSE created_at
+         END
+       WHERE created_at IS NULL OR created_at = ''`
+    )
+  } catch (_) {}
 
   await conn.execute(`
     CREATE TABLE IF NOT EXISTS game_folders (
@@ -416,8 +433,8 @@ async function tauriAdd(game) {
     )
   } else {
     await conn.execute(
-      `INSERT INTO games (id, title, platform, install_path, cover_url, hero_url, logo_url, playtime_minutes, progress_percent, last_played, status, raw_file_name, raw_folder_name, metadata_fetched, normalized_title, rating, release_date, favorite, steam_app_id, last_seen_installed, gog_id, epic_id, ubisoft_id, updated_at, deleted, is_new)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
+      `INSERT INTO games (id, title, platform, install_path, cover_url, hero_url, logo_url, playtime_minutes, progress_percent, last_played, status, raw_file_name, raw_folder_name, metadata_fetched, normalized_title, rating, release_date, favorite, steam_app_id, last_seen_installed, gog_id, epic_id, ubisoft_id, updated_at, deleted, is_new, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)`,
       [
         id,
         game.title,
@@ -445,6 +462,7 @@ async function tauriAdd(game) {
         game.updated_at || new Date().toISOString(),
         game.deleted ? 1 : 0,
         game.is_new ? 1 : 0,
+        game.created_at || new Date().toISOString(),
       ],
     )
   }
