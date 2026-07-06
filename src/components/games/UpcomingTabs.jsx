@@ -1,4 +1,5 @@
 import { Sparkles, Heart, Clock, Flame, Crown, History } from 'lucide-react'
+import { useTabIndicator } from '../../hooks/useTabIndicator'
 
 // Tab registry kept in one place so dashboard + /upcoming share it.
 export const UPCOMING_TABS = [
@@ -25,8 +26,10 @@ export const UPCOMING_TABS = [
  */
 export default function UpcomingTabs({ active, onChange, counts = {}, size = 'md', hiddenIds = [] }) {
   const visible = UPCOMING_TABS.filter(t => !hiddenIds.includes(t.id))
+  const { tabRef, indicatorStyle } = useTabIndicator(active, visible.map(t => t.id).join(','))
   return (
-    <div className={`upcoming-tabs upcoming-tabs--${size}`} role="tablist">
+    <div ref={tabRef} className={`upcoming-tabs upcoming-tabs--${size}`} role="tablist">
+      <span className="upcoming-tabs__slider" style={indicatorStyle} aria-hidden="true" />
       {visible.map(({ id, label, Icon }) => {
         const isActive = id === active
         const count    = counts[id]
@@ -35,6 +38,7 @@ export default function UpcomingTabs({ active, onChange, counts = {}, size = 'md
             key={id}
             role="tab"
             aria-selected={isActive}
+            data-tab-active={isActive ? 'true' : undefined}
             className={`upcoming-tabs__btn ${isActive ? 'upcoming-tabs__btn--active' : ''}`}
             onClick={() => onChange(id)}
             type="button"

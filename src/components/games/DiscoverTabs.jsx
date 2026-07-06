@@ -1,4 +1,5 @@
 import { Sparkles, Compass, Flame, Diamond, Heart } from 'lucide-react'
+import { useTabIndicator } from '../../hooks/useTabIndicator'
 
 export const DISCOVER_TABS = [
   { id: 'for_you',     label: 'For You',      Icon: Sparkles },
@@ -9,8 +10,10 @@ export const DISCOVER_TABS = [
 ]
 
 export default function DiscoverTabs({ active, onChange, counts = {}, size = 'md' }) {
+  const { tabRef, indicatorStyle } = useTabIndicator(active)
   return (
-    <div className={`upcoming-tabs upcoming-tabs--${size}`} role="tablist">
+    <div ref={tabRef} className={`upcoming-tabs upcoming-tabs--${size}`} role="tablist">
+      <span className="upcoming-tabs__slider" style={indicatorStyle} aria-hidden="true" />
       {DISCOVER_TABS.map(({ id, label, Icon }) => {
         const isActive = id === active
         const count = counts[id]
@@ -19,6 +22,7 @@ export default function DiscoverTabs({ active, onChange, counts = {}, size = 'md
             key={id}
             role="tab"
             aria-selected={isActive}
+            data-tab-active={isActive ? 'true' : undefined}
             className={`upcoming-tabs__btn ${isActive ? 'upcoming-tabs__btn--active' : ''}`}
             onClick={() => onChange(id)}
             type="button"
