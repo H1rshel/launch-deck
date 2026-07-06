@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react'
+import { useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
 import ProtectedRoute from './components/auth/ProtectedRoute'
@@ -91,62 +91,75 @@ export default function App() {
     }
   }, [isLoading])
 
-  // Startup update check — runs once after auth + game loading are done and a
-  // user is present. Respects the user's updateMode preference. Never throws
-  // or shows errors automatically; failures are silently ignored.
-  useEffect(() => {
-    if (isLoading || !user) return
+  // Automatic update check. Runs at startup, then periodically and whenever the
+  // window regains focus, so an update published *after* launch is still caught
+  // (not only once at boot). Respects updateMode; failures are silent. A found
+  // update surfaces a prominent toast + bottom-right banner + bell notification.
+  const lastUpdateCheckRef = useRef(0)
+  const FOCUS_THROTTLE_MS = 30 * 60 * 1000 // don't re-check on focus more than every 30 min
+  const PERIODIC_MS = 3 * 60 * 60 * 1000 // background re-check every 3 hours
 
+  const runUpdateCheck = useCallback(async ({ force = false } = {}) => {
     const mode = readSetting('updateMode')
     if (mode === UPDATE_MODES.MANUAL_ONLY) return
 
-    let cancelled = false
+    const now = Date.now()
+    if (!force && now - lastUpdateCheckRef.current < FOCUS_THROTTLE_MS) return
+    lastUpdateCheckRef.current = now
 
-    async function runStartupCheck() {
-      const result = await checkAndNotifyUpdate()
-      if (cancelled || result.status !== 'available') return
+    const result = await checkAndNotifyUpdate()
+    if (result.status !== 'available') return
 
-      if (mode === UPDATE_MODES.NOTIFY_ONLY) {
-        setUpdateBanner({
-          version: result.version,
-          notes: result.notes,
-          update: result.update,
-        })
-        addNotification({
-          title: `Launch Deck ${result.version} is available`,
-          message: result.notes || 'Open Updates to download and install it.',
-          type: 'info',
-          route: '/settings',
-          routeState: { scrollTo: 'updates' },
-          dedupeKey: `update-available-${result.version}`,
-        })
-        return
-      }
-
-      if (mode === UPDATE_MODES.AUTO_DOWNLOAD) {
-        // Download silently in the background; show banner when ready
-        try {
-          await downloadAndInstallUpdate(result.update, () => {})
-          if (!cancelled) {
-            setUpdateBanner({ version: result.version, notes: result.notes, update: null, ready: true })
-            addNotification({
-              title: `Launch Deck ${result.version} is ready`,
-              message: 'Restart Launch Deck to apply the update.',
-              type: 'success',
-              route: '/settings',
-              routeState: { scrollTo: 'updates' },
-              dedupeKey: `update-ready-${result.version}`,
-            })
-          }
-        } catch {
-          // Silent failure — user can always check manually in Settings
-        }
-      }
+    if (mode === UPDATE_MODES.NOTIFY_ONLY) {
+      setUpdateBanner({
+        version: result.version,
+        notes: result.notes,
+        update: result.update,
+      })
+      addNotification({
+        title: `Launch Deck ${result.version} is available`,
+        message: result.notes || 'Open Updates to download and install it.',
+        type: 'info',
+        route: '/settings',
+        routeState: { scrollTo: 'updates' },
+        dedupeKey: `update-available-${result.version}`,
+      })
+      return
     }
 
-    runStartupCheck()
-    return () => { cancelled = true }
-  }, [isLoading, user, addNotification]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (mode === UPDATE_MODES.AUTO_DOWNLOAD) {
+      // Download silently in the background; surface toast/banner when ready.
+      try {
+        await downloadAndInstallUpdate(result.update, () => {})
+        setUpdateBanner({ version: result.version, notes: result.notes, update: null, ready: true })
+        addNotification({
+          title: `Launch Deck ${result.version} is ready`,
+          message: 'Restart Launch Deck to apply the update.',
+          type: 'success',
+          route: '/settings',
+          routeState: { scrollTo: 'updates' },
+          dedupeKey: `update-ready-${result.version}`,
+        })
+      } catch {
+        // Silent failure — user can always check manually in Settings
+      }
+    }
+  }, [addNotification]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (isLoading || !user) return
+
+    runUpdateCheck({ force: true }) // always check right after startup
+
+    const interval = setInterval(() => runUpdateCheck(), PERIODIC_MS)
+    const onFocus = () => runUpdateCheck() // throttled internally
+    window.addEventListener('focus', onFocus)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [isLoading, user, runUpdateCheck]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Suspense fallback={<div className="loading-screen"><div className="loading-spinner" /></div>}>

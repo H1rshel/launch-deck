@@ -19177,6 +19177,126 @@ h6 {
   to   { opacity: 0; transform: translateY(10px); }
 }
 
+/* ── Prominent update toast (top-center, auto-dismissing) ─────────────── */
+.update-toast {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 11px 12px 11px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(16, 22, 36, 0.98), rgba(10, 14, 23, 0.98));
+  border: 1px solid rgba(0, 212, 255, 0.38);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.55),
+    0 0 34px rgba(0, 212, 255, 0.16);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: update-toast-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes update-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -22px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.update-toast--leaving {
+  animation: update-toast-out 0.3s ease forwards;
+}
+
+@keyframes update-toast-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -18px);
+  }
+}
+
+.update-toast__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: rgba(0, 212, 255, 0.14);
+  color: var(--accent-cyan);
+}
+
+.update-toast__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.update-toast__title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.update-toast__msg {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-toast__cta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 12px;
+  background: var(--accent-cyan);
+  color: #041018;
+  transition: filter 0.2s ease;
+}
+
+.update-toast__cta:hover {
+  filter: brightness(1.12);
+}
+
+.update-toast__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.update-toast__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
 .update-banner {
   position: fixed;
   bottom: 24px;

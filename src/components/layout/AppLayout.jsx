@@ -6,6 +6,7 @@ import GameLoadingScreen from '../games/GameLoadingScreen'
 import SessionEndModal from '../games/SessionEndModal'
 import SyncToast from '../ui/SyncToast'
 import UpdateBanner from '../ui/UpdateBanner'
+import UpdateToast from '../ui/UpdateToast'
 import NowPlayingBar from '../ui/NowPlayingBar'
 import { getUpdateBanner, subscribeUpdateBanner } from '../../services/updateState'
 
@@ -50,6 +51,7 @@ export default function AppLayout() {
         <SessionEndModal summary={sessionSummary} onClose={clearSessionSummary} />
       )}
       {syncToast && <SyncToast toast={syncToast} onDismiss={clearSyncToast} />}
+      {updateBanner && <UpdateToast banner={updateBanner} />}
       {updateBanner && <UpdateBanner banner={updateBanner} />}
     </div>
   )
