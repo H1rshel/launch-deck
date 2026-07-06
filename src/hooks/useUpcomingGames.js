@@ -22,6 +22,52 @@ const RECENT_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — recent releases u
 // can look up cached data before useAuth() resolves the user.
 let _preloadedUserId = null;
 
+// ── localStorage persistence ──────────────────────────────────────────────────
+// The in-memory cache above is lost on every app restart, so the dashboard's
+// Upcoming row had to re-hit the edge function on each launch (visible skeleton
+// delay). Persisting it — plus the last user id — lets the row hydrate instantly
+// from the previous session, then refresh in the background.
+const _PERSIST_KEY = "ld_upcoming_feed_cache_v1";
+const _LAST_USER_KEY = "ld_upcoming_last_user_id";
+
+try {
+  _preloadedUserId = localStorage.getItem(_LAST_USER_KEY) || null;
+} catch {
+  /* ignore */
+}
+
+try {
+  const raw = localStorage.getItem(_PERSIST_KEY);
+  if (raw) {
+    const obj = JSON.parse(raw);
+    const now = Date.now();
+    for (const [k, v] of Object.entries(obj)) {
+      const feedInKey = k.split("|")[1];
+      const ttl = feedInKey === "recent" ? RECENT_CACHE_TTL_MS : CACHE_TTL_MS;
+      if (v && typeof v.ts === "number" && now - v.ts <= ttl) {
+        _feedCache.set(k, v);
+      }
+    }
+  }
+} catch {
+  /* corrupt cache — ignore */
+}
+
+let _persistTimer = null;
+function _persistCache() {
+  if (_persistTimer) return;
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    try {
+      const obj = {};
+      for (const [k, v] of _feedCache) obj[k] = v;
+      localStorage.setItem(_PERSIST_KEY, JSON.stringify(obj));
+    } catch {
+      /* quota or serialization error — non-fatal */
+    }
+  }, 500);
+}
+
 function _cacheKey(userId, feed, timeframe, page, date_from, date_to, sort) {
   return [
     userId || "anon",
@@ -49,6 +95,7 @@ function _getCached(key) {
 
 function _setCache(key, payload) {
   _feedCache.set(key, { ...payload, ts: Date.now() });
+  _persistCache();
 }
 
 /** Bust the Following feed cache only (used when the feed list needs refreshing). */
@@ -183,6 +230,11 @@ const _preloadInflight = new Map();
 export async function preloadUpcomingFeeds(userId, activeFeed = "for_you") {
   if (!userId) return;
   _preloadedUserId = userId;
+  try {
+    localStorage.setItem(_LAST_USER_KEY, userId);
+  } catch {
+    /* ignore */
+  }
   const followedSetPromise = loadFollowedSet(userId).catch(() => new Set());
 
   const savedPeriod = sessionStorage.getItem("upcoming_period") || "all";
