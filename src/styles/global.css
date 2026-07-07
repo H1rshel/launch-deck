@@ -14714,6 +14714,16 @@ h6 {
     border-radius 0.2s ease;
 }
 
+/* Underline variant — for text tabs whose active state is a bottom border
+   (not a filled pill). Slides a 2px accent underline instead of a boxed pill. */
+.tab-slider--underline {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--accent-cyan);
+  border-radius: 0 !important;
+  box-shadow: none;
+}
+
 /* Lift the tab buttons above the sliding pill. */
 .tab-slider ~ * {
   position: relative;

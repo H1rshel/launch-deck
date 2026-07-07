@@ -151,7 +151,7 @@ export default function AvatarManager({ isOpen, onClose }) {
         ) : (
           <>
             <div className="avatar-manager__tabs" ref={avatarTabRef}>
-              <span className="tab-slider" style={avatarIndicatorStyle} aria-hidden="true" />
+              <span className="tab-slider tab-slider--underline" style={avatarIndicatorStyle} aria-hidden="true" />
               <button
                 className={`avatar-manager__tab ${activeTab === 'upload' ? 'avatar-manager__tab--active' : ''}`}
                 data-tab-active={activeTab === 'upload' ? 'true' : undefined}

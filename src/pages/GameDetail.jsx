@@ -463,7 +463,7 @@ function ImagePicker({ game, onApply, onClose }) {
         </div>
 
         <div className="cover-picker__tabs" ref={coverTabRef}>
-          <span className="tab-slider" style={coverIndicatorStyle} aria-hidden="true" />
+          <span className="tab-slider tab-slider--underline" style={coverIndicatorStyle} aria-hidden="true" />
           {["cover", "hero", "logo"].map((tab) => (
             <button
               key={tab}

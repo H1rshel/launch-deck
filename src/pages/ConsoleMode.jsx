@@ -5,7 +5,6 @@ import { Play, Power, Star, Clock, MonitorPlay, Heart, History, Library, Gamepad
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
 import { getGameImages } from '../utils/imageHandler'
-import { useTabIndicator } from '../hooks/useTabIndicator'
 import { ImageWithFallback, GameLogo } from '../components/ui/GameImages'
 import GameLoadingScreen from '../components/games/GameLoadingScreen'
 import SessionEndModal from '../components/games/SessionEndModal'
@@ -96,7 +95,6 @@ export default function ConsoleMode() {
   })
 
   const [activeView, setActiveView] = useState('all')
-  const { tabRef: viewTabRef, indicatorStyle: viewIndicatorStyle } = useTabIndicator(activeView)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [isSplashing, setIsSplashing] = useState(() => !isStartup)
   const [splashVisible, setSplashVisible] = useState(false)
@@ -516,25 +514,21 @@ export default function ConsoleMode() {
           <div className="console-mode__bumper">
             <ChevronLeft size={11} /><span>LB</span>
           </div>
-          <div className="console-mode__tab-strip" ref={viewTabRef}>
-            <span className="tab-slider" style={viewIndicatorStyle} aria-hidden="true" />
+          <div className="console-mode__tab-strip">
             <button
               className={`console-mode__tab ${activeView === 'all' ? 'console-mode__tab--active' : ''}`}
-              data-tab-active={activeView === 'all' ? 'true' : undefined}
               onClick={() => { playSound(bufNav); setActiveView('all') }}
             >
               <Library size={15} /><span>All Games</span>
             </button>
             <button
               className={`console-mode__tab ${activeView === 'favorites' ? 'console-mode__tab--active' : ''}`}
-              data-tab-active={activeView === 'favorites' ? 'true' : undefined}
               onClick={() => { playSound(bufNav); setActiveView('favorites') }}
             >
               <Heart size={15} /><span>Favorites</span>
             </button>
             <button
               className={`console-mode__tab ${activeView === 'recent' ? 'console-mode__tab--active' : ''}`}
-              data-tab-active={activeView === 'recent' ? 'true' : undefined}
               onClick={() => { playSound(bufNav); setActiveView('recent') }}
             >
               <History size={15} /><span>Recent</span>
