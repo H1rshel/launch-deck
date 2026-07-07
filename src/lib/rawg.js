@@ -254,7 +254,7 @@ export async function searchCovers(query) {
       }))
   } catch (err) {
     console.error(`Cover search failed for "${query}":`, err)
-    return []
+    throw err // surface the reason in the image picker (only caller catches)
   }
 }
 
@@ -833,12 +833,14 @@ export async function searchSteamGridAssets(query, assetType = 'grids') {
   try {
     const assets = await invoke('search_steamgrid_assets', { query, assetType })
     return assets.map((c) => ({
-      name: `${c.style} by ${c.author}`, 
+      name: `${c.style} by ${c.author}`,
       url: c.url,
     }))
   } catch (err) {
     console.error(`SteamGridDB search failed for "${query}":`, err)
-    return []
+    // Re-throw so callers (e.g. the image picker) can surface the real reason
+    // instead of silently showing nothing. Enrichment call sites already catch.
+    throw err
   }
 }
 
