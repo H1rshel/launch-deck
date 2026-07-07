@@ -45,6 +45,7 @@ const APP_USER_AGENT: &str = concat!(
 fn app_http_client() -> Client {
     Client::builder()
         .user_agent(APP_USER_AGENT)
+        .timeout(Duration::from_secs(20))
         .build()
         .unwrap_or_else(|_| Client::new())
 }
@@ -584,7 +585,7 @@ async fn search_steamgrid_assets(
     dotenv().ok();
     let sgd_key = get_env("VITE_SGD_API_KEY")
         .map_err(|_| "VITE_SGD_API_KEY not set in .env".to_string())?;
-    let client = Client::new();
+    let client = app_http_client();
     let safe_query = query.replace(" ", "%20");
 
     let sgd_search_url = format!(
@@ -654,7 +655,7 @@ async fn search_steamgrid_games(query: String) -> Result<Vec<SteamGridGameRespon
     dotenv().ok();
     let sgd_key = get_env("VITE_SGD_API_KEY")
         .map_err(|_| "VITE_SGD_API_KEY not set in .env".to_string())?;
-    let client = Client::new();
+    let client = app_http_client();
     let safe_query = query.replace(" ", "%20");
     let sgd_search_url = format!(
         "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
@@ -693,7 +694,7 @@ async fn search_games_db(query: String) -> Result<Vec<GamesDbResult>, String> {
     let api_key = get_env("VITE_GAMES_DB_API_KEY")
         .map_err(|_| "VITE_GAMES_DB_API_KEY not set in .env".to_string())?;
 
-    let client = Client::new();
+    let client = app_http_client();
     let safe_query = query.replace(' ', "+");
     let url = format!(
         "https://api.thegamesdb.net/v1/Games/ByGameName?apikey={}&name={}&fields=game_title,release_date&include=boxart&limit=10",
@@ -5855,7 +5856,7 @@ async fn search_igdb_games(query: String) -> Result<Vec<IgdbGameResult>, String>
     let client_id =
         get_env("IGDB_CLIENT_ID").map_err(|_| "IGDB_CLIENT_ID not found".to_string())?;
 
-    let client = Client::new();
+    let client = app_http_client();
     let token = get_igdb_token(&client).await?;
 
     // Sanitize query to avoid IGDB syntax errors
@@ -6107,7 +6108,7 @@ async fn get_igdb_game_by_id(game_id: u64) -> Result<Option<IgdbGameResult>, Str
     let client_id =
         get_env("IGDB_CLIENT_ID").map_err(|_| "IGDB_CLIENT_ID not found".to_string())?;
 
-    let client = Client::new();
+    let client = app_http_client();
     let token = get_igdb_token(&client).await?;
 
     let body = format!(

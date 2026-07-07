@@ -306,26 +306,8 @@ function ImagePicker({ game, onApply, onClose }) {
     setLoading(true)
     setSearchError(null)
     let assets = []
-    let fallbackError = null
+    let searchErr = null
 
-    const loadWebAssets = async () => {
-      const webResults = await searchWebImages(buildAssetWebSearchQuery(query, activeTab))
-      const mapped = webResults.map((r) => ({
-        name: r.source || "Web Image",
-        url: r.url,
-        width: r.width,
-        height: r.height,
-      }))
-
-      const newRes = {}
-      webResults.forEach((r) => {
-        if (r.width > 0 && r.height > 0) {
-          newRes[r.url] = `${r.width}\u00d7${r.height}`
-        }
-      })
-      setResolutions((prev) => ({ ...prev, ...newRes }))
-      return mapped
-    }
     try {
       if (source === "web") {
         const webResults = await searchWebImages(buildAssetWebSearchQuery(query, activeTab))
@@ -376,21 +358,26 @@ function ImagePicker({ game, onApply, onClose }) {
         assets = await searchSteamGridAssets(query.trim(), type)
       }
     } catch (err) {
-      fallbackError = typeof err === "string" ? err : err?.message || "Search failed"
+      searchErr = typeof err === "string" ? err : err?.message || "Search failed"
     }
 
-    // Don't silently fall back to the web search for RAWG — it's a distinct
-    // source, and substituting web/Bing results made "RAWG" identical to the
-    // "Web Images" source. Other sources (SteamGridDB/IGDB) keep the fallback.
-    if (source !== "web" && source !== "rawg" && assets.length === 0) {
-      const fallbackAssets = await loadWebAssets()
-      if (fallbackAssets.length > 0) {
-        assets = fallbackAssets
-      } else if (fallbackError) {
-        setSearchError(fallbackError)
+    // Never silently substitute web/Bing results for another source — that made
+    // every source look identical when one returned nothing. Show its own
+    // results, or a clear per-source message. "Web Images" is the explicit web
+    // source if the user wants Bing results.
+    if (searchErr) {
+      setSearchError(searchErr)
+    } else if (assets.length === 0) {
+      const SOURCE_NAMES = {
+        steamgrid: "SteamGridDB",
+        igdb: "IGDB",
+        rawg: "RAWG",
+        web: "Web Images",
       }
-    } else if (fallbackError) {
-      setSearchError(fallbackError)
+      const name = SOURCE_NAMES[source] || source
+      setSearchError(
+        `No ${activeTab} images from ${name} for "${query.trim()}". Try again, or switch source (e.g. Web Images).`
+      )
     }
 
     setResults(assets)
