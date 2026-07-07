@@ -2259,6 +2259,7 @@ h6 {
 .page__content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 28px;
   animation: page-enter 0.4s ease-out;
 }
