@@ -359,11 +359,15 @@ function ImagePicker({ game, onApply, onClose }) {
           }
         }
       } else if (source === "rawg") {
-        if (activeTab === "cover") {
+        // RAWG only exposes background art (no dedicated heroes/logos). Use it
+        // for cover AND hero (it's a wide, hero-suitable image) so RAWG returns
+        // its own distinct results instead of nothing. It has nothing usable
+        // for logos.
+        if (activeTab === "logo") {
+          assets = []
+        } else {
           const rawrs = await searchCovers(query.trim())
           assets = rawrs.map((r) => ({ name: r.name, url: r.cover_url }))
-        } else {
-          assets = []
         }
       } else {
         let type = "grids"
@@ -375,7 +379,10 @@ function ImagePicker({ game, onApply, onClose }) {
       fallbackError = typeof err === "string" ? err : err?.message || "Search failed"
     }
 
-    if (source !== "web" && assets.length === 0) {
+    // Don't silently fall back to the web search for RAWG — it's a distinct
+    // source, and substituting web/Bing results made "RAWG" identical to the
+    // "Web Images" source. Other sources (SteamGridDB/IGDB) keep the fallback.
+    if (source !== "web" && source !== "rawg" && assets.length === 0) {
       const fallbackAssets = await loadWebAssets()
       if (fallbackAssets.length > 0) {
         assets = fallbackAssets
