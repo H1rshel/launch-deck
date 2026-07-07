@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { CalendarDays, Search, X, ArrowUpDown, ChevronDown } from "lucide-react"
+import { CalendarDays, Search, X, ArrowUpDown, ChevronDown, Loader2 } from "lucide-react"
 import TopBar from "../components/layout/TopBar"
 import PageHeader from "../components/layout/PageHeader"
 import UpcomingGameCard from "../components/games/UpcomingGameCard"
@@ -86,6 +86,12 @@ const TIMEFRAME_MAP = {
 const VALID_TABS = ["forYou", "following", "soon", "recent", "big", "popular"]
 const VALID_PERIODS = ["week", "month", "quarter", "all"]
 
+// Preserves how many pages were loaded + the scroll position per feed, so
+// opening a game detail and coming back restores the grid instead of resetting
+// to page 1 at the top. Module-level so it survives the page unmount.
+const _browse = new Map()
+const browseKey = (tab, period, sort) => `${tab}|${period}|${sort}`
+
 const SORT_OPTIONS = [
   { id: "release_date", label: "Release Date" },
   { id: "popularity", label: "Popularity" },
@@ -105,7 +111,19 @@ export default function UpcomingReleases() {
     const saved = sessionStorage.getItem("upcoming_period")
     return saved && VALID_PERIODS.includes(saved) ? saved : "all"
   })
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(() => {
+    // Restore how many pages were loaded for this feed on last visit.
+    const t = sessionStorage.getItem("upcoming_tab")
+    const p = sessionStorage.getItem("upcoming_period")
+    let s = sessionStorage.getItem("upcoming_sort")
+    if (!s || s === "release_date") s = "popularity"
+    const key = browseKey(
+      VALID_TABS.includes(t) ? t : "forYou",
+      VALID_PERIODS.includes(p) ? p : "all",
+      VALID_SORTS.includes(s) ? s : "popularity"
+    )
+    return _browse.get(key)?.page || 1
+  })
   const [igdbQuery, setIgdbQuery] = useState("")
   const [sortOpen, setSortOpen] = useState(false)
   const [sort, setSort] = useState(() => {
@@ -118,6 +136,9 @@ export default function UpcomingReleases() {
   })
   const igdbInputRef = useRef(null)
   const sortRef = useRef(null)
+  const contentRef = useRef(null)
+  const didMount = useRef(false)
+  const scrollRestored = useRef(false)
 
   // Close sort dropdown when clicking outside
   useEffect(() => {
@@ -140,9 +161,42 @@ export default function UpcomingReleases() {
     sessionStorage.setItem("upcoming_sort", sort)
   }, [sort])
 
-  // Reset page when tab, period, or sort changes
+  // Reset page + scroll when the user changes tab/period/sort — but NOT on the
+  // initial mount, so a restored page (from navigating back) is preserved.
   useEffect(() => {
+    if (!didMount.current) {
+      didMount.current = true
+      return
+    }
     setPage(1)
+    scrollRestored.current = true // don't re-restore old scroll for new filter
+    contentRef.current?.scrollTo({ top: 0 })
+  }, [tab, period, sort])
+
+  // Persist the current page for this feed so it survives navigation/unmount.
+  useEffect(() => {
+    const k = browseKey(tab, period, sort)
+    _browse.set(k, { ...(_browse.get(k) || {}), page })
+  }, [tab, period, sort, page])
+
+  // Save scroll position (throttled) as the user scrolls the grid.
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    let raf = 0
+    const onScroll = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        const k = browseKey(tab, period, sort)
+        _browse.set(k, { ...(_browse.get(k) || {}), scrollTop: el.scrollTop })
+      })
+    }
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      el.removeEventListener("scroll", onScroll)
+      if (raf) cancelAnimationFrame(raf)
+    }
   }, [tab, period, sort])
 
   const {
@@ -185,6 +239,20 @@ export default function UpcomingReleases() {
       setTab("forYou")
   }, [tab, facets])
 
+  // Restore the saved scroll position once the (accumulated) grid has rendered.
+  useEffect(() => {
+    if (scrollRestored.current || isInitializing || games.length === 0) return
+    const el = contentRef.current
+    if (!el) return
+    scrollRestored.current = true
+    const saved = _browse.get(browseKey(tab, period, sort))?.scrollTop
+    if (saved && saved > 0) {
+      requestAnimationFrame(() => {
+        el.scrollTop = saved
+      })
+    }
+  }, [isInitializing, games.length, tab, period, sort])
+
   return (
     <div className="page upcoming-page page--unified">
       <TopBar />
@@ -196,7 +264,7 @@ export default function UpcomingReleases() {
         image="/upcoming-releases.png"
         subtitle="Curated picks, followed titles, and the biggest launches on the horizon."
       />
-      <div className="page__content">
+      <div className="page__content" ref={contentRef}>
         {/* ── Controls row (glass, integrated with header) ───────────── */}
         <div className="glass-panel upcoming-page__controls upcoming-page__controls--integrated">
           <UpcomingTabs
@@ -380,11 +448,18 @@ export default function UpcomingReleases() {
             {hasMore && (
               <div className="upcoming-page__load-more">
                 <button
-                  className="upcoming-page__load-more-btn"
+                  className={`upcoming-page__load-more-btn${loading ? " upcoming-page__load-more-btn--loading" : ""}`}
                   onClick={() => setPage((prev) => prev + 1)}
                   disabled={loading}
                 >
-                  {loading ? "Loading..." : "Load More"}
+                  {loading ? (
+                    <>
+                      <Loader2 size={15} className="upcoming-page__load-more-spinner" />
+                      <span>Loading…</span>
+                    </>
+                  ) : (
+                    "Load More"
+                  )}
                 </button>
               </div>
             )}

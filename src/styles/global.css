@@ -1496,6 +1496,62 @@ h6 {
   transition-duration: 0.1s;
 }
 
+/* Glass backdrop for the button + a soft glow behind the load-more area so it
+   reads as its own surface rather than floating on the page background. */
+.upcoming-page__load-more-btn {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.upcoming-page__load-more {
+  position: relative;
+}
+
+.upcoming-page__load-more::before {
+  content: "";
+  position: absolute;
+  inset: -24px -80px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 212, 255, 0.06),
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Loading state — keep the glass look, don't grey out, and keep things moving. */
+.upcoming-page__load-more-btn:disabled {
+  cursor: progress;
+  opacity: 1;
+  transform: none;
+}
+
+.upcoming-page__load-more-btn--loading {
+  color: var(--accent-cyan);
+  border-color: rgba(0, 212, 255, 0.32);
+  background: rgba(0, 212, 255, 0.09);
+}
+
+.upcoming-page__load-more-btn--loading::after {
+  animation: load-more-shine 1.15s ease-in-out infinite;
+}
+
+@keyframes load-more-shine {
+  0% {
+    left: -100%;
+  }
+  55%,
+  100% {
+    left: 100%;
+  }
+}
+
+.upcoming-page__load-more-spinner {
+  color: var(--accent-cyan);
+  animation: spin 0.7s linear infinite;
+}
+
 /* =============================================================
    TopBar — Premium Gaming Header
    Three zones: brand LEFT · search CENTER · actions RIGHT

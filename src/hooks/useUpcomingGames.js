@@ -98,6 +98,22 @@ function _setCache(key, payload) {
   _persistCache();
 }
 
+// Rebuild the full "load more" list (pages 1..page) from cache. Returns null if
+// any page isn't cached. Lets the grid restore its accumulated list after the
+// user navigates to a game detail and back (or reopens the app) instead of
+// snapping back to page 1.
+function _accumulateFromCache(userId, feed, timeframe, page, date_from, date_to, sort, limit) {
+  const acc = [];
+  for (let p = 1; p <= page; p++) {
+    const cached = _getCached(
+      _cacheKey(userId, feed, timeframe, p, date_from, date_to, sort)
+    );
+    if (!cached) return null;
+    acc.push(...cached.items.slice(0, limit));
+  }
+  return acc;
+}
+
 /** Bust the Following feed cache only (used when the feed list needs refreshing). */
 export function bustFollowingFeedCache() {
   for (const [k] of _feedCache) {
@@ -333,7 +349,14 @@ export function useUpcomingGames(options = {}) {
   const initCache = effectiveUserId ? _getCached(initKey) : null;
   const initFollowedSet = getCachedFollowedSet(effectiveUserId);
 
-  const [games, setGames] = useState(() => (initCache ? initCache.items.slice(0, limit) : []));
+  const [games, setGames] = useState(() => {
+    // Restore the full accumulated list (pages 1..page) if it's cached, so
+    // returning to this feed at page N doesn't snap back to page 1.
+    const acc = effectiveUserId
+      ? _accumulateFromCache(effectiveUserId, feed, timeframe, page, date_from, date_to, sort, limit)
+      : null;
+    return acc ?? (initCache ? initCache.items.slice(0, limit) : []);
+  });
   const [meta, setMeta] = useState(() => (initCache ? initCache.meta : null));
   const [facets, setFacets] = useState(() => (initCache ? initCache.facets : null));
   const [loading, setLoading] = useState(() => !initCache);
@@ -392,7 +415,10 @@ export function useUpcomingGames(options = {}) {
         if (!(cached.items.length < limit && cached.meta?.has_more)) {
           if (cancelled || currentFetch !== fetchCounter.current) return;
           const slice = cached.items.slice(0, limit);
-          setGames((prev) => (page === 1 ? slice : [...prev, ...slice]));
+          setGames((prev) => {
+            const acc = _accumulateFromCache(user.id, feed, timeframe, page, date_from, date_to, sort, limit);
+            return acc ?? (page === 1 ? slice : [...prev, ...slice]);
+          });
           setMeta(cached.meta);
           if (page === 1) setFacets(cached.facets);
           if (feed === "following") {
@@ -416,7 +442,10 @@ export function useUpcomingGames(options = {}) {
         const preloaded = _getCached(key);
         if (preloaded && !(preloaded.items.length < limit && preloaded.meta?.has_more)) {
           const slice = preloaded.items.slice(0, limit);
-          setGames((prev) => (page === 1 ? slice : [...prev, ...slice]));
+          setGames((prev) => {
+            const acc = _accumulateFromCache(user.id, feed, timeframe, page, date_from, date_to, sort, limit);
+            return acc ?? (page === 1 ? slice : [...prev, ...slice]);
+          });
           setMeta(preloaded.meta);
           if (page === 1) setFacets(preloaded.facets);
           if (feed === "following") {
