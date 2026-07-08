@@ -7003,6 +7003,20 @@ fn main() {
             }
         })
         .setup(|app| {
+            // Paint the native window + webview background the app's dark color.
+            // In borderless fullscreen (Console Mode) WebView2 leaves the bottom
+            // 1px row unpainted; without this it shows the host window's default
+            // (light) background as a seam along the bottom edge. The
+            // tauri.conf.json `backgroundColor` key is ignored by from_config in
+            // Tauri 2.11, so this must be applied at runtime.
+            {
+                use tauri::Manager;
+                if let Some(main_window) = app.get_webview_window("main") {
+                    let _ = main_window
+                        .set_background_color(Some(tauri::window::Color(4, 6, 11, 255)));
+                }
+            }
+
             // ── System tray ───────────────────────────────────────────────
             {
                 use tauri::menu::{Menu, MenuItem};
