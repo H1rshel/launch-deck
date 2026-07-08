@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
 import { detectPadType } from '../console/input/gamepad'
 
 const START_BUTTON = 9 // Start / Menu / Options
@@ -24,7 +24,7 @@ export function useGamepadConsoleEntry() {
 
   const enterConsole = useCallback(() => {
     try {
-      getCurrentWindow().setFullscreen(true).catch(() => {})
+      invoke('set_console_fullscreen', { enabled: true }).catch(() => {})
     } catch {}
     navigate('/console')
   }, [navigate])

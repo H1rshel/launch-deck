@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Power } from 'lucide-react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
 import { useGameContext } from '../context/GameContext'
 import { getGameImages } from '../utils/imageHandler'
 import GameLoadingScreen from '../components/games/GameLoadingScreen'
@@ -178,9 +178,7 @@ function ConsoleRoot({ isStartup }) {
   // ── Window / navigation ──
   const exitConsoleMode = useCallback(async (to = '/dashboard') => {
     try {
-      const appWindow = getCurrentWindow()
-      await appWindow.setFullscreen(false)
-      await appWindow.maximize()
+      await invoke('set_console_fullscreen', { enabled: false })
     } catch (e) {
       console.warn('Failed to exit fullscreen:', e)
     }
@@ -202,15 +200,18 @@ function ConsoleRoot({ isStartup }) {
     // and stacking both causes WebView2 edge artifacts.
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
 
-    let appWindow
+    let entered = false
     try {
-      appWindow = getCurrentWindow()
-      // On startup, App.jsx sets fullscreen after closing the native splashscreen
-      if (!isStartup) appWindow.setFullscreen(true).catch(() => {})
+      // On startup, App.jsx sets fullscreen (with overscan) after closing the
+      // native splashscreen; otherwise enter it now.
+      if (!isStartup) {
+        invoke('set_console_fullscreen', { enabled: true }).catch(() => {})
+        entered = true
+      }
     } catch (err) {
       console.warn('Tauri window API not available', err)
     }
-    return () => { if (appWindow) appWindow.setFullscreen(false).catch(() => {}) }
+    return () => { if (entered) invoke('set_console_fullscreen', { enabled: false }).catch(() => {}) }
   }, [isStartup])
 
   // ── Game actions ──

@@ -13,7 +13,7 @@ import {
   CalendarDays,
   Compass,
 } from "lucide-react"
-import { getCurrentWindow } from "@tauri-apps/api/window"
+import { invoke } from "@tauri-apps/api/core"
 
 const navItems = [
   {
@@ -108,11 +108,11 @@ export default function Sidebar({ padConnected = false, padType = null }) {
             to="/console"
             className="sidebar__console-btn"
             onClick={async () => {
-              // Window fullscreen only — DOM requestFullscreen on top of it
-              // causes rendering artifacts (stray strip) in WebView2.
+              // Borderless fullscreen with a bottom overscan (handled in Rust)
+              // so WebView2 doesn't leave a seam at the bottom edge. DOM
+              // requestFullscreen on top of it causes rendering artifacts.
               try {
-                const appWindow = getCurrentWindow()
-                await appWindow.setFullscreen(true).catch(() => {})
+                await invoke('set_console_fullscreen', { enabled: true })
               } catch (err) {
                 console.warn(err)
               }
