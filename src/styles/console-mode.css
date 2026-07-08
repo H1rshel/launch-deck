@@ -72,9 +72,17 @@ body:has(.console-os) {
 /* ── Root ── */
 .console-os {
   position: fixed;
-  inset: 0;
   /* no 100vw/100vh — vw includes the scrollbar gutter and overflows,
      which painted a scrollbar strip along the bottom edge */
+  /* top/left/right pinned to 0; bottom overscans 2px past the viewport so any
+     sub-pixel gap at the very bottom edge (WebView2 rounds the page viewport
+     ~1px short of the window client in borderless fullscreen at fractional DPI)
+     is filled with the console background/art instead of showing a seam. The
+     overflow:clip below hides the 2px spillover. */
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: -2px;
   background: #04060b;
   color: #fff;
   z-index: 9999;

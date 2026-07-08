@@ -5547,39 +5547,10 @@ async fn get_hltb_data(query: String) -> HltbResult {
     }
 }
 
-/// Enter true borderless fullscreen for Console Mode.
-///
-/// `set_fullscreen(true)` sizes the window to exactly the monitor and hides the
-/// taskbar, but WebView2 renders ~1px short of the client area in borderless
-/// fullscreen, leaving a light/dark seam along the bottom edge. We grow the
-/// window a couple pixels past the monitor's bottom so that short row falls
-/// off-screen and the visible area is fully painted — flawless like a native
-/// game or Steam Big Picture. tao only re-clamps a fullscreen window when it
-/// moves to a *different* monitor, so a same-monitor resize sticks and the
-/// taskbar stays hidden.
-fn apply_fullscreen_overscan(window: &tauri::WebviewWindow) {
-    let win = window.clone();
-    tauri::async_runtime::spawn(async move {
-        // Let the OS settle into borderless fullscreen before resizing, or the
-        // fullscreen sizing can overwrite our overscan.
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        // Bail if the user already left fullscreen (e.g. entered then exited
-        // Console Mode within the delay) so we don't resize a windowed window.
-        if !win.is_fullscreen().unwrap_or(false) {
-            return;
-        }
-        if let Ok(Some(monitor)) = win.current_monitor() {
-            let size = monitor.size();
-            let _ = win.set_size(tauri::PhysicalSize::new(size.width, size.height + 2));
-        }
-    });
-}
-
 #[tauri::command]
 async fn set_console_fullscreen(window: tauri::WebviewWindow, enabled: bool) -> Result<(), String> {
     if enabled {
         window.set_fullscreen(true).map_err(|e| e.to_string())?;
-        apply_fullscreen_overscan(&window);
     } else {
         window.set_fullscreen(false).map_err(|e| e.to_string())?;
         let _ = window.maximize();
@@ -5599,7 +5570,6 @@ async fn close_splashscreen(window: tauri::Window, fullscreen: Option<bool>, max
     if let Some(main_window) = window.get_webview_window("main") {
         if fullscreen.unwrap_or(false) {
             let _ = main_window.set_fullscreen(true);
-            apply_fullscreen_overscan(&main_window);
         } else if maximize.unwrap_or(false) {
             let _ = main_window.maximize();
         }
