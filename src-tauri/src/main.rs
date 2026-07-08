@@ -5550,6 +5550,12 @@ async fn get_hltb_data(query: String) -> HltbResult {
 #[tauri::command]
 async fn set_console_fullscreen(window: tauri::WebviewWindow, enabled: bool) -> Result<(), String> {
     if enabled {
+        // A maximized (WS_MAXIMIZE) window is clamped by Windows to the work
+        // area, so set_fullscreen can only reach screen-minus-taskbar and the
+        // taskbar stays visible as a band at the bottom. Clearing the maximized
+        // state first lets fullscreen cover the whole monitor and hide the
+        // taskbar. This is resolution/DPI/taskbar-position independent.
+        let _ = window.unmaximize();
         window.set_fullscreen(true).map_err(|e| e.to_string())?;
     } else {
         window.set_fullscreen(false).map_err(|e| e.to_string())?;
@@ -5569,6 +5575,9 @@ async fn close_splashscreen(window: tauri::Window, fullscreen: Option<bool>, max
     // Apply window state before show() so the user never sees an intermediate size
     if let Some(main_window) = window.get_webview_window("main") {
         if fullscreen.unwrap_or(false) {
+            // Clear any maximized state first — a maximized window is clamped to
+            // the work area, leaving the taskbar visible in fullscreen.
+            let _ = main_window.unmaximize();
             let _ = main_window.set_fullscreen(true);
         } else if maximize.unwrap_or(false) {
             let _ = main_window.maximize();

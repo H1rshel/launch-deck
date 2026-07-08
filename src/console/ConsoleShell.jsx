@@ -22,55 +22,6 @@ import SearchOverlay from './overlays/SearchOverlay'
 import '../styles/console-mode.css'
 
 /**
- * TEMPORARY diagnostic overlay — measures how the fullscreen bottom gap
- * arises. Shows viewport vs. screen dimensions so we can compute the exact
- * shortfall and fix it precisely for every scaling factor. Remove after.
- */
-function FullscreenDebug() {
-  const [m, setM] = useState(null)
-  useEffect(() => {
-    let maxInner = 0
-    const read = () => {
-      maxInner = Math.max(maxInner, window.innerHeight)
-      setM({
-        inner: `${window.innerWidth}×${window.innerHeight}`,
-        outer: `${window.outerWidth}×${window.outerHeight}`,
-        screen: `${window.screen.width}×${window.screen.height}`,
-        avail: `${window.screen.availWidth}×${window.screen.availHeight}`,
-        dpr: window.devicePixelRatio,
-        maxInner,
-        gap: window.screen.height - window.innerHeight,
-      })
-    }
-    read()
-    const id = setInterval(read, 400)
-    window.addEventListener('resize', read)
-    return () => { clearInterval(id); window.removeEventListener('resize', read) }
-  }, [])
-  if (!m) return null
-  const row = { display: 'flex', justifyContent: 'space-between', gap: 24 }
-  return (
-    <div style={{
-      position: 'fixed', top: 90, left: 24, zIndex: 100000,
-      background: 'rgba(0,0,0,0.85)', color: '#00e0ff', padding: '14px 18px',
-      borderRadius: 10, border: '1px solid #00e0ff', font: '600 15px/1.6 monospace',
-      minWidth: 320, pointerEvents: 'none', boxShadow: '0 0 24px rgba(0,224,255,0.4)',
-    }}>
-      <div style={{ color: '#fff', marginBottom: 6, fontSize: 13 }}>FULLSCREEN DEBUG</div>
-      <div style={row}><span>innerHeight</span><span>{m.inner}</span></div>
-      <div style={row}><span>outerHeight</span><span>{m.outer}</span></div>
-      <div style={row}><span>screen</span><span>{m.screen}</span></div>
-      <div style={row}><span>avail</span><span>{m.avail}</span></div>
-      <div style={row}><span>devicePixelRatio</span><span>{m.dpr}</span></div>
-      <div style={row}><span>max innerH seen</span><span>{m.maxInner}</span></div>
-      <div style={{ ...row, color: m.gap === 0 ? '#3fbf6f' : '#ff5a5a' }}>
-        <span>screen.h - innerH</span><span>{m.gap}px</span>
-      </div>
-    </div>
-  )
-}
-
-/**
  * Console Mode — Launch Deck's controller-first, fullscreen OS.
  *
  * The shell owns the boot sequence, the ambient/hero background, the
@@ -385,8 +336,6 @@ function ConsoleRoot({ isStartup }) {
       className={`console-os ${activeGames.size > 0 ? 'console-os--session' : ''} ${attract ? 'console-os--attract' : ''}`}
       data-device={device}
     >
-      <FullscreenDebug />
-
       {/* Background stack: ambient glow + blurred fill + hero art */}
       <div className="cos-ambient" aria-hidden="true" />
       <div
