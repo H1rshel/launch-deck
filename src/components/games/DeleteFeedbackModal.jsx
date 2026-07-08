@@ -38,11 +38,24 @@ export default function DeleteFeedbackModal({ game, onConfirm, onCancel }) {
     animateOut(onCancel)
   }, [animateOut, onCancel])
 
-  // Keyboard handling
+  // Keyboard handling (arrows navigate reasons — also driven by Console Mode's
+  // gamepad bridge, which synthesizes these key events)
   useEffect(() => {
     function onKey(e) {
       if (e.key === 'Escape') handleCancel()
       if (e.key === 'Enter' && selected) handleConfirm()
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const tag = document.activeElement?.tagName
+        if (tag === 'TEXTAREA' || tag === 'INPUT') return
+        e.preventDefault()
+        const delta = e.key === 'ArrowDown' ? 1 : -1
+        const idx = FEEDBACK_REASON_LABELS.indexOf(selected)
+        const next =
+          idx === -1
+            ? delta === 1 ? 0 : FEEDBACK_REASON_LABELS.length - 1
+            : Math.min(FEEDBACK_REASON_LABELS.length - 1, Math.max(0, idx + delta))
+        setSelected(FEEDBACK_REASON_LABELS[next])
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

@@ -593,12 +593,12 @@ function ImagePicker({ game, onApply, onClose }) {
           </div>
         )}
 
-        {/* Big Picture Mode Preview — only visible on hero tab */}
+        {/* Console Mode Preview — only visible on hero tab */}
         {activeTab === "hero" && (
           <div className="cover-picker__bp-preview">
             <span className="cover-picker__bp-preview-label">
               <MonitorPlay size={12} />
-              Big Picture Preview
+              Console Mode Preview
             </span>
             {stagedImages.hero ? (
               <div
@@ -643,7 +643,7 @@ function ImagePicker({ game, onApply, onClose }) {
             ) : (
               <div className="cover-picker__bp-preview-empty">
                 <MonitorPlay size={20} />
-                <span>Select a hero image to preview Big Picture mode</span>
+                <span>Select a hero image to preview Console Mode</span>
               </div>
             )}
           </div>

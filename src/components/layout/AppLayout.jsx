@@ -9,8 +9,14 @@ import UpdateBanner from '../ui/UpdateBanner'
 import UpdateToast from '../ui/UpdateToast'
 import NowPlayingBar from '../ui/NowPlayingBar'
 import { getUpdateBanner, subscribeUpdateBanner } from '../../services/updateState'
+import { useGamepadConsoleEntry } from '../../hooks/useGamepadConsoleEntry'
+import ControllerDock from '../ui/ControllerDock'
 
 export default function AppLayout() {
+  // Start/Menu on a connected controller enters Console Mode from anywhere;
+  // the ControllerDock makes the shortcut visible while a pad is connected.
+  const { connected: padConnected, padType, enterConsole } = useGamepadConsoleEntry()
+
   const {
     launchingGame,
     installingGame,
@@ -31,7 +37,7 @@ export default function AppLayout() {
 
   return (
     <div className={`app-layout${hasActiveGame ? ' app-layout--playing' : ''}`}>
-      <Sidebar />
+      <Sidebar padConnected={padConnected} padType={padType} />
       <main className="app-layout__main">
         <Outlet />
       </main>
@@ -53,6 +59,9 @@ export default function AppLayout() {
       {syncToast && <SyncToast toast={syncToast} onDismiss={clearSyncToast} />}
       {updateBanner && <UpdateToast banner={updateBanner} />}
       {updateBanner && <UpdateBanner banner={updateBanner} />}
+
+      <ControllerDock connected={padConnected} padType={padType} onEnter={enterConsole} />
+
     </div>
   )
 }

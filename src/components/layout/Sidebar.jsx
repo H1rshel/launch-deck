@@ -71,7 +71,7 @@ function NavItem({ to, icon: Icon, label, color, isActive }) {
   )
 }
 
-export default function Sidebar() {
+export default function Sidebar({ padConnected = false, padType = null }) {
   const { signOut } = useAuth()
   const location = useLocation()
 
@@ -108,12 +108,9 @@ export default function Sidebar() {
             to="/console"
             className="sidebar__console-btn"
             onClick={async () => {
+              // Window fullscreen only — DOM requestFullscreen on top of it
+              // causes rendering artifacts (stray strip) in WebView2.
               try {
-                if (!document.fullscreenElement) {
-                  await document.documentElement
-                    .requestFullscreen()
-                    .catch(() => {})
-                }
                 const appWindow = getCurrentWindow()
                 await appWindow.setFullscreen(true).catch(() => {})
               } catch (err) {
@@ -124,7 +121,15 @@ export default function Sidebar() {
             <div className="sidebar__console-icon">
               <MonitorPlay size={16} />
             </div>
-            <span>Big Picture</span>
+            <span>Console Mode</span>
+            {padConnected && (
+              <kbd
+                className="sidebar__console-pad"
+                title={`Controller connected — press ${padType === 'ps' ? 'OPTIONS' : 'Start'} to enter`}
+              >
+                {padType === 'ps' ? 'OPT' : '≡'}
+              </kbd>
+            )}
           </NavLink>
 
           <button className="sidebar__signout" onClick={signOut}>

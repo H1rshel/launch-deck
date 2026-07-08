@@ -12,7 +12,7 @@ function formatElapsed(seconds) {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export default function ConsoleModeNowPlaying({ gamepadConnected }) {
+export default function ConsoleModeNowPlaying() {
   const { games, activeGames, liveElapsed, forceEndSession } = useGameContext()
 
   const activeIds = Array.from(activeGames)
@@ -70,17 +70,13 @@ export default function ConsoleModeNowPlaying({ gamepadConnected }) {
           ))}
         </div>
 
-        {/* Stop */}
+        {/* Stop — also reachable from the Quick Menu's End Session */}
         <button
           className="console-now-playing__stop"
           onClick={() => forceEndSession(gameId)}
           title="End session"
         >
-          {gamepadConnected ? (
-            <kbd className="console-now-playing__hotkey console-now-playing__hotkey--yellow">Y</kbd>
-          ) : (
-            <kbd className="console-now-playing__hotkey">Q</kbd>
-          )}
+          <Square size={12} fill="currentColor" />
           <span>End</span>
         </button>
       </div>

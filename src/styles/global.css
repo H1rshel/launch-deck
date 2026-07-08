@@ -1319,7 +1319,7 @@ h6 {
   );
 }
 
-/* Console / Big Picture button */
+/* Console Mode button */
 .sidebar__console-btn {
   display: flex;
   align-items: center;
@@ -8029,7 +8029,7 @@ h6 {
   color: var(--accent-cyan);
 }
 
-/* --- Big Picture Preview (hero tab) --- */
+/* --- Console Mode Preview (hero tab) --- */
 .cover-picker__bp-preview {
   padding: 12px 24px;
   border-top: 1px solid var(--border);
@@ -19694,4 +19694,132 @@ h6 {
   border: 1px solid rgba(244, 63, 94, 0.18);
   border-radius: var(--radius-sm);
   background: rgba(244, 63, 94, 0.05);
+}
+
+/* ─── Controller Dock (desktop → Console Mode affordance) ─── */
+@keyframes controller-dock-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(16px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes controller-dock-pulse {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.55)); }
+  50%       { filter: drop-shadow(0 0 14px rgba(0, 212, 255, 0.9)); }
+}
+
+.controller-dock {
+  position: fixed;
+  bottom: 20px;
+  left: calc(var(--sidebar-width, 240px) + (100vw - var(--sidebar-width, 240px)) / 2);
+  transform: translateX(-50%);
+  z-index: 800;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 10px 14px;
+  background: linear-gradient(145deg, rgba(14, 18, 28, 0.92), rgba(8, 10, 16, 0.96));
+  border: 1px solid rgba(0, 212, 255, 0.28);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    0 10px 34px rgba(0, 0, 0, 0.6),
+    0 0 24px rgba(0, 212, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  animation: controller-dock-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.controller-dock:hover {
+  border-color: rgba(0, 212, 255, 0.55);
+  box-shadow:
+    0 10px 34px rgba(0, 0, 0, 0.6),
+    0 0 34px rgba(0, 212, 255, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Lift above the Now Playing bar while a session is active */
+.app-layout--playing .controller-dock {
+  bottom: 76px;
+}
+
+.controller-dock__icon {
+  display: flex;
+  color: var(--accent-cyan);
+  animation: controller-dock-pulse 2.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.controller-dock__text {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: var(--font-heading);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  transition: max-width 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s ease, margin-left 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.controller-dock--expanded .controller-dock__text {
+  max-width: 320px;
+  opacity: 1;
+  margin-left: 11px;
+}
+
+.controller-dock__text strong {
+  color: var(--accent-cyan);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.controller-dock__key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 21px;
+  padding: 0 6px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-bottom-width: 2.5px;
+  border-radius: 5px;
+  font-family: var(--font-heading);
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+}
+
+/* Start-button badge on the sidebar Console Mode button while a pad is connected */
+@keyframes sidebar-pad-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(0, 212, 255, 0.25); border-color: rgba(0, 212, 255, 0.4); }
+  50%       { box-shadow: 0 0 12px rgba(0, 212, 255, 0.55); border-color: rgba(0, 212, 255, 0.7); }
+}
+
+.sidebar__console-pad {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: auto;
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.4);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: var(--font-heading);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent-cyan);
+  animation: sidebar-pad-pulse 2.4s ease-in-out infinite;
+  flex-shrink: 0;
 }

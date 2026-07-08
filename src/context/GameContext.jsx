@@ -1042,6 +1042,9 @@ export function GameProvider({ children }) {
         setGameCollection,
         clearGameCollection,
         markGameSeen,
+        // Exposed so Console Mode can drive these global modals with a controller
+        pendingLaunchConfirm,
+        pendingRemoveGame,
       }}
     >
       {children}
