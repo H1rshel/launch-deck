@@ -438,52 +438,58 @@ pub async fn fetch_game_data(query: &str) -> Result<GameData, String> {
     let sgd_key = get_env("VITE_SGD_API_KEY")
         .map_err(|_| "VITE_SGD_API_KEY not set in .env".to_string())?;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let client = app_http_client();
 
     let safe_query = query.replace(" ", "%20");
 
-    // 1. RAWG API Call
+    // 1. RAWG API Call — best-effort. A miss here (no match, timeout, bad
+    // response) must NOT prevent the independent SteamGridDB lookup below:
+    // SteamGridDB is the only source of hero/logo art, and scanner-derived
+    // titles frequently fail to match on RAWG even when SteamGridDB has
+    // perfectly good assets for the same game.
     let rawg_url = format!(
         "https://api.rawg.io/api/games?search={}&key={}",
         safe_query, rawg_key
     );
-    let rawg_res = client
-        .get(&rawg_url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch from RAWG: {}", e))?
-        .json::<RawgResponse>()
-        .await
-        .map_err(|e| format!("Failed to parse RAWG response: {}", e))?;
+    let rawg_game = match client.get(&rawg_url).send().await {
+        Ok(res) => match res.json::<RawgResponse>().await {
+            Ok(data) => data.results.into_iter().next(),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    };
 
-    let rawg_game = rawg_res
-        .results
-        .into_iter()
-        .next()
-        .ok_or_else(|| "No game found on RAWG".to_string())?;
-
-    let mut game_data = GameData {
-        id: rawg_game.id,
-        name: rawg_game.name,
-        release_date: rawg_game.released,
-        genres: rawg_game
-            .genres
-            .unwrap_or_default()
-            .into_iter()
-            .map(|g| g.name)
-            .collect(),
-        platforms: rawg_game
-            .platforms
-            .unwrap_or_default()
-            .into_iter()
-            .map(|p| p.platform.name)
-            .collect(),
-        cover: rawg_game.background_image.clone(),
-        hero: None,
-        logo: None,
+    let mut game_data = match rawg_game {
+        Some(rawg_game) => GameData {
+            id: rawg_game.id,
+            name: rawg_game.name,
+            release_date: rawg_game.released,
+            genres: rawg_game
+                .genres
+                .unwrap_or_default()
+                .into_iter()
+                .map(|g| g.name)
+                .collect(),
+            platforms: rawg_game
+                .platforms
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| p.platform.name)
+                .collect(),
+            cover: rawg_game.background_image.clone(),
+            hero: None,
+            logo: None,
+        },
+        None => GameData {
+            id: 0,
+            name: query.to_string(),
+            release_date: None,
+            genres: Vec::new(),
+            platforms: Vec::new(),
+            cover: None,
+            hero: None,
+            logo: None,
+        },
     };
 
     // 2. SteamGridDB Fetch

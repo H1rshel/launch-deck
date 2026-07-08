@@ -519,7 +519,10 @@ export async function fetchGameDetails(query, options = {}) {
 
 /**
  * Enrich all unenriched games.
- * Priority: IGDB (title/genres/franchise/date) → RAWG (rating fallback) → SteamGridDB (images).
+ * Metadata priority: IGDB (title/genres/franchise/date) → RAWG (rating fallback).
+ * Image priority: SteamGridDB is the default source for cover/hero/logo; IGDB's
+ * cover and RAWG's cover are only used as a last-resort fallback when
+ * SteamGridDB has nothing.
  *
  * @param {function} getUnenriched - async fn returning games where metadata_fetched = false
  * @param {function} updateMeta - async fn(id, metadata) to save to DB
@@ -539,6 +542,8 @@ export async function enrichAllGames(getUnenriched, updateMeta, onProgress) {
     const searchTitle = game.normalized_title || game.raw_folder_name || game.title || game.raw_file_name
     let igdbMeta = null
     let rawgMeta = null
+    let igdbCoverUrl = ''
+    let rawgCoverUrl = ''
     let bestCover = ''
     let heroUrl = ''
     let logoUrl = ''
@@ -570,7 +575,7 @@ export async function enrichAllGames(getUnenriched, updateMeta, onProgress) {
               ? new Date(match.firstReleaseDate * 1000).toISOString().split('T')[0]
               : '',
           }
-          if (match.coverUrl) bestCover = match.coverUrl
+          if (match.coverUrl) igdbCoverUrl = match.coverUrl
           // Populate IGDB detail cache for instant loads on the game page
           const developers = (match.involvedCompanies || [])
             .filter(c => c.isDeveloper)
@@ -630,10 +635,12 @@ export async function enrichAllGames(getUnenriched, updateMeta, onProgress) {
     // 2. RAWG — secondary, mainly for community rating; also fallback title/date
     try {
       rawgMeta = await fetchGameMetadata(game)
-      if (rawgMeta && !bestCover) bestCover = rawgMeta.cover_url || ''
+      if (rawgMeta) rawgCoverUrl = rawgMeta.cover_url || ''
     } catch (_) {}
 
-    // 3. SteamGridDB — primary source for cover/hero/logo
+    // 3. SteamGridDB — the default/primary source for ALL images (cover, hero,
+    // logo). IGDB/RAWG covers above are only used as a last-resort fallback
+    // when SteamGridDB has nothing, never preferred over it.
     const titleForImages = igdbMeta?.normalized_title || rawgMeta?.normalized_title || searchTitle
     try {
       const unified = await fetchUnifiedGameData(titleForImages)
@@ -641,19 +648,38 @@ export async function enrichAllGames(getUnenriched, updateMeta, onProgress) {
         if (unified.cover) bestCover = unified.cover
         if (unified.hero) heroUrl = unified.hero
         if (unified.logo) logoUrl = unified.logo
-      } else {
+      }
+      if (!unified || (!unified.hero && !unified.logo && !unified.cover)) {
         const [grids, heroes, logos] = await Promise.all([
-          searchSteamGridAssets(titleForImages, 'grids'),
-          searchSteamGridAssets(titleForImages, 'heroes'),
-          searchSteamGridAssets(titleForImages, 'logos'),
+          searchSteamGridAssets(titleForImages, 'grids').catch(() => []),
+          searchSteamGridAssets(titleForImages, 'heroes').catch(() => []),
+          searchSteamGridAssets(titleForImages, 'logos').catch(() => []),
         ])
-        if (grids?.length > 0) bestCover = grids[0].url
-        if (heroes?.length > 0) heroUrl = heroes[0].url
-        if (logos?.length > 0) logoUrl = logos[0].url
+        if (!bestCover && grids?.length > 0) bestCover = grids[0].url
+        if (!heroUrl && heroes?.length > 0) heroUrl = heroes[0].url
+        if (!logoUrl && logos?.length > 0) logoUrl = logos[0].url
       }
     } catch (err) {
-      console.warn(`SteamGridDB fetch failed for "${titleForImages}":`, err)
+      // fetchUnifiedGameData threw (e.g. missing API key, IPC failure) —
+      // fall back to the independent per-asset-type SteamGridDB search
+      // rather than leaving hero/logo empty for the whole game.
+      console.warn(`SteamGridDB unified fetch failed for "${titleForImages}", falling back:`, err)
+      try {
+        const [grids, heroes, logos] = await Promise.all([
+          searchSteamGridAssets(titleForImages, 'grids').catch(() => []),
+          searchSteamGridAssets(titleForImages, 'heroes').catch(() => []),
+          searchSteamGridAssets(titleForImages, 'logos').catch(() => []),
+        ])
+        if (!bestCover && grids?.length > 0) bestCover = grids[0].url
+        if (!heroUrl && heroes?.length > 0) heroUrl = heroes[0].url
+        if (!logoUrl && logos?.length > 0) logoUrl = logos[0].url
+      } catch (fallbackErr) {
+        console.warn(`SteamGridDB fallback fetch failed for "${titleForImages}":`, fallbackErr)
+      }
     }
+
+    // SteamGridDB had nothing usable — fall back to IGDB's cover, then RAWG's.
+    if (!bestCover) bestCover = igdbCoverUrl || rawgCoverUrl
 
     if (igdbMeta || rawgMeta || bestCover) {
       const updates = {
