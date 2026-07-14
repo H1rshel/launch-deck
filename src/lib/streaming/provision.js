@@ -122,15 +122,36 @@ export async function provisionSunshineHost(userId, onProgress = () => {}) {
   // One elevated script = one UAC prompt for the whole setup. The NSIS
   // installer registers the SunshineService (auto-start) and adds the
   // required firewall rules itself.
+  //
+  // CRITICAL: the installer auto-launches sunshine.exe even with /S, and any
+  // stray (non-service) instance holds Sunshine's files locked — every
+  // service start then dies with "file is being used by another process".
+  // So every step is bracketed with process kills, and the service start is
+  // verified in a retry loop; a script that can't get the service Running
+  // exits non-zero so the user sees a real error instead of a dead API.
   const escape = (s) => String(s).replace(/'/g, "''")
   const lines = []
   if (installerPath) {
     lines.push(`Start-Process -FilePath '${escape(installerPath)}' -ArgumentList '/S' -Wait`)
     lines.push(`Start-Sleep -Seconds 2`)
   }
+  lines.push(`Stop-Service -Name SunshineService -ErrorAction SilentlyContinue`)
+  lines.push(`Stop-Process -Name sunshine -Force -ErrorAction SilentlyContinue`)
+  lines.push(`Stop-Process -Name sunshinesvc -Force -ErrorAction SilentlyContinue`)
+  lines.push(`Start-Sleep -Seconds 1`)
   lines.push(`& 'C:\\Program Files\\Sunshine\\sunshine.exe' --creds '${escape(username)}' '${escape(password)}'`)
-  lines.push(`Restart-Service -Name SunshineService -ErrorAction SilentlyContinue`)
-  lines.push(`Start-Service -Name SunshineService -ErrorAction SilentlyContinue`)
+  lines.push(`Stop-Process -Name sunshine -Force -ErrorAction SilentlyContinue`)
+  lines.push(`Start-Sleep -Seconds 1`)
+  lines.push(`$tries = 0`)
+  lines.push(`while ($tries -lt 5) {`)
+  lines.push(`  Start-Service -Name SunshineService -ErrorAction SilentlyContinue`)
+  lines.push(`  Start-Sleep -Seconds 2`)
+  lines.push(`  if ((Get-Service -Name SunshineService).Status -eq 'Running') { break }`)
+  lines.push(`  Stop-Process -Name sunshine -Force -ErrorAction SilentlyContinue`)
+  lines.push(`  Stop-Process -Name sunshinesvc -Force -ErrorAction SilentlyContinue`)
+  lines.push(`  $tries++`)
+  lines.push(`}`)
+  lines.push(`if ((Get-Service -Name SunshineService).Status -ne 'Running') { exit 1 }`)
 
   await invoke('run_elevated_script', { script: lines.join('\n') })
 
@@ -138,7 +159,7 @@ export async function provisionSunshineHost(userId, onProgress = () => {}) {
   const ok = await verifySunshineApi()
   if (!ok) {
     throw new Error(
-      'Sunshine was installed but its API did not come up. Restart this PC and toggle streaming again.',
+      'The streaming service installed but did not respond. Toggle streaming again to retry — if it keeps failing, restart this PC first.',
     )
   }
 
