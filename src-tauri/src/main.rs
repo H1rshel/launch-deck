@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod scanner;
+pub mod streaming;
 
 use base64::Engine;
 use dotenv::dotenv;
@@ -7141,7 +7142,17 @@ fn main() {
             fetch_cheapshark_deals,
             fetch_itad_deals,
             detect_hardware,
-            fetch_image_base64
+            fetch_image_base64,
+            streaming::get_hostname,
+            streaming::get_local_ip,
+            streaming::download_file,
+            streaming::extract_zip,
+            streaming::run_elevated_script,
+            streaming::is_sunshine_installed,
+            streaming::is_sunshine_service_running,
+            streaming::sunshine_api,
+            streaming::launch_moonlight,
+            streaming::kill_process_by_name
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

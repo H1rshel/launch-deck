@@ -19823,3 +19823,132 @@ h6 {
   animation: sidebar-pad-pulse 2.4s ease-in-out infinite;
   flex-shrink: 0;
 }
+
+/* ═══════════════════════ Streaming (multi-PC) ═══════════════════════ */
+
+/* Stream primary action — accented like Play but distinct */
+.game-detail__play-btn--stream {
+  background: linear-gradient(135deg, var(--accent-cyan), #7b2ff7);
+  color: #fff;
+  border: none;
+  box-shadow: 0 4px 20px rgba(0, 212, 255, 0.35);
+}
+.game-detail__play-btn--stream:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 6px 26px rgba(0, 212, 255, 0.45);
+}
+
+.game-card__install-btn--stream {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+/* Cancel button floating over the stream loading screen */
+.streaming-overlay__cancel {
+  position: fixed;
+  bottom: 42px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(10, 12, 20, 0.55);
+  color: var(--text-primary, #fff);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.streaming-overlay__cancel:hover {
+  background: rgba(244, 63, 94, 0.25);
+  border-color: rgba(244, 63, 94, 0.6);
+}
+
+/* Settings → Streaming device list */
+.settings__device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+}
+.settings__device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+.settings__device-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.settings__device-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.settings__device-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings__device-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+}
+.settings__device-badge--host {
+  background: rgba(0, 212, 255, 0.14);
+  color: var(--accent-cyan);
+}
+.settings__device-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings__device-dot {
+  color: var(--text-muted);
+  opacity: 0.45;
+  flex-shrink: 0;
+}
+.settings__device-dot--online {
+  color: #22c55e;
+  opacity: 1;
+}
+.settings__device-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.settings__device-remove:hover {
+  color: #f43f5e;
+  background: rgba(244, 63, 94, 0.12);
+}

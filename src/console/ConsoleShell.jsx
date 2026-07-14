@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { Power } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { useGameContext } from '../context/GameContext'
+import { useStreaming } from '../context/StreamingContext'
 import { getGameImages } from '../utils/imageHandler'
 import GameLoadingScreen from '../components/games/GameLoadingScreen'
+import StreamingOverlay from '../components/games/StreamingOverlay'
 import SessionEndModal from '../components/games/SessionEndModal'
 import AchievementsModal from '../components/games/AchievementsModal'
 import ConsoleModeNowPlaying from '../components/games/ConsoleModeNowPlaying'
@@ -146,6 +148,7 @@ function ConsoleRoot({ isStartup }) {
     pendingLaunchConfirm,
     pendingRemoveGame,
   } = useGameContext()
+  const { getStreamSource, startStream, streamingSession, cancelStreaming } = useStreaming()
   const { gamepadConnected, device, subscribeActivity } = useConsoleInput()
 
   const [screen, setScreen] = useState('home')
@@ -219,9 +222,10 @@ function ConsoleRoot({ isStartup }) {
     (game) => {
       if (!game) return
       if (game.installed) playGame(game).catch(console.error)
+      else if (getStreamSource(game)) startStream(game).catch(console.error)
       else installGame(game).catch(console.error)
     },
-    [playGame, installGame]
+    [playGame, installGame, getStreamSource, startStream]
   )
 
   const endSession = useCallback(() => {
@@ -271,6 +275,7 @@ function ConsoleRoot({ isStartup }) {
     !!sessionSummary ||
     !!launchingGame ||
     !!installingGame ||
+    !!streamingSession ||
     !!pendingLaunchConfirm ||
     !!pendingRemoveGame
 
@@ -329,7 +334,7 @@ function ConsoleRoot({ isStartup }) {
     )
   }
 
-  const blocked = !!launchingGame || !!installingGame
+  const blocked = !!launchingGame || !!installingGame || !!streamingSession
 
   return (
     <div
@@ -398,6 +403,7 @@ function ConsoleRoot({ isStartup }) {
           achData={actionSheetGame.id === focusedGame?.id ? achData : null}
           onClose={() => setActionSheetId(null)}
           onPrimary={handlePrimary}
+          streamSource={getStreamSource(actionSheetGame)}
           toggleFavorite={toggleFavorite}
           onShowAchievements={() => setShowAchievements(true)}
           onViewDetails={viewDetails}
@@ -454,6 +460,9 @@ function ConsoleRoot({ isStartup }) {
           statusText={`Opening ${installingGame.launcher}`}
           subtitle={`Preparing the installation flow in ${installingGame.launcher}.`}
         />
+      )}
+      {streamingSession && (
+        <StreamingOverlay session={streamingSession} onCancel={cancelStreaming} />
       )}
 
       {activeGames.size > 0 && <ConsoleModeNowPlaying />}

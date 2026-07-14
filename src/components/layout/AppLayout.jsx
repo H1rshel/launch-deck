@@ -2,7 +2,9 @@ import { Outlet } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 import { useGameContext } from '../../context/GameContext'
+import { useStreaming } from '../../context/StreamingContext'
 import GameLoadingScreen from '../games/GameLoadingScreen'
+import StreamingOverlay from '../games/StreamingOverlay'
 import SessionEndModal from '../games/SessionEndModal'
 import SyncToast from '../ui/SyncToast'
 import UpdateBanner from '../ui/UpdateBanner'
@@ -26,6 +28,7 @@ export default function AppLayout() {
     clearSyncToast,
     activeGames,
   } = useGameContext()
+  const { streamingSession, cancelStreaming } = useStreaming()
 
   const hasActiveGame = activeGames.size > 0
 
@@ -52,6 +55,9 @@ export default function AppLayout() {
           statusText={`Opening ${installingGame.launcher}`}
           subtitle={`Preparing the installation flow in ${installingGame.launcher}.`}
         />
+      )}
+      {streamingSession && (
+        <StreamingOverlay session={streamingSession} onCancel={cancelStreaming} />
       )}
       {sessionSummary && (
         <SessionEndModal summary={sessionSummary} onClose={clearSessionSummary} />

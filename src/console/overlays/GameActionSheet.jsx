@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { Play, Download, Heart, HeartOff, Trophy, Info, Trash2, Ban } from 'lucide-react'
+import { Play, Download, Heart, HeartOff, Trophy, Info, Trash2, Ban, MonitorPlay } from 'lucide-react'
 import { getGameImages } from '../../utils/imageHandler'
 import { ImageWithFallback, GameLogo } from '../../components/ui/GameImages'
 import { getInstallTarget } from '../../lib/launcher'
@@ -16,6 +16,7 @@ export default function GameActionSheet({
   achData,
   onClose,
   onPrimary,
+  streamSource,
   toggleFavorite,
   onShowAchievements,
   onViewDetails,
@@ -26,6 +27,7 @@ export default function GameActionSheet({
   const options = useMemo(() => {
     const list = []
     if (game.installed) list.push({ id: 'primary', label: 'Play', icon: Play })
+    else if (streamSource) list.push({ id: 'primary', label: `Stream from ${streamSource.hostname}`, icon: MonitorPlay })
     else if (getInstallTarget(game)) list.push({ id: 'primary', label: 'Install', icon: Download })
     else list.push({ id: 'primary', label: 'Not Installed', icon: Ban, disabled: true })
     list.push({
@@ -37,7 +39,7 @@ export default function GameActionSheet({
     list.push({ id: 'details', label: 'View in Desktop Mode', icon: Info })
     list.push({ id: 'remove', label: 'Remove from Library', icon: Trash2, danger: true })
     return list
-  }, [game, achData])
+  }, [game, achData, streamSource])
 
   useEffect(() => {
     if (index > options.length - 1) setIndex(Math.max(0, options.length - 1))

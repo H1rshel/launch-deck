@@ -1,7 +1,8 @@
 import { memo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, Download, Star, Trash2, Heart, X } from 'lucide-react'
+import { Play, Download, Star, Trash2, Heart, X, MonitorPlay } from 'lucide-react'
 import { useGameContext } from '../../context/GameContext'
+import { useStreaming } from '../../context/StreamingContext'
 import { canInstallGame } from '../../lib/launcher'
 
 import { getGameImages } from '../../utils/imageHandler'
@@ -18,6 +19,8 @@ function formatDate(dateStr) {
 function GameCard({ game, onRemove, onClearFranchise, isExiting }) {
   const navigate = useNavigate()
   const { playGame, toggleFavorite, installGame } = useGameContext()
+  const { getStreamSource, startStream } = useStreaming()
+  const streamSource = getStreamSource(game)
   const { cover, hero } = getGameImages(game)
   const bgImage = cover || hero
   const coverStyle = bgImage
@@ -53,7 +56,9 @@ function GameCard({ game, onRemove, onClearFranchise, isExiting }) {
           <span className="game-card__title-lg">{game.displayTitle}</span>
         </div>
         {!game.installed && (
-          <span className="game-card__uninstalled-badge">Not Installed</span>
+          <span className="game-card__uninstalled-badge">
+            {streamSource ? 'Streamable' : 'Not Installed'}
+          </span>
         )}
         {!!game.is_new && (
           <span className="game-card__new-badge">New</span>
@@ -123,6 +128,15 @@ function GameCard({ game, onRemove, onClearFranchise, isExiting }) {
           )}
           {game.installed ? (
             <span className="game-card__status game-card__status--installed">Installed</span>
+          ) : streamSource ? (
+            <button
+              className="game-card__install-btn game-card__install-btn--stream"
+              onClick={(e) => { e.stopPropagation(); startStream(game) }}
+              title={`Stream from ${streamSource.hostname}`}
+            >
+              <MonitorPlay size={14} />
+              Stream
+            </button>
           ) : installable ? (
             <button className="game-card__install-btn" onClick={handleInstall}>
               <Download size={14} />

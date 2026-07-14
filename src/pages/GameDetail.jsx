@@ -46,6 +46,7 @@ import {
 import { useOnlineStatus } from "../hooks/useOnlineStatus"
 import { useVisibility } from "../hooks/useVisibility"
 import { useTabIndicator } from "../hooks/useTabIndicator"
+import { useStreaming } from "../context/StreamingContext"
 import {
   Play,
   Square,
@@ -884,6 +885,7 @@ export default function GameDetail() {
     refreshGames,
     markGameSeen,
   } = useGameContext()
+  const { getStreamSource, startStream } = useStreaming()
   const [editingName, setEditingName] = useState(false)
   const [showImagePicker, setShowImagePicker] = useState(false)
   const [showMetadataSearch, setShowMetadataSearch] = useState(false)
@@ -1099,6 +1101,7 @@ export default function GameDetail() {
       ? "Metadata has not been cached for this game yet."
       : "Offline. Cached metadata is not available for this game yet.")
   const installable = canInstallGame(game)
+  const streamSource = getStreamSource(game)
 
   async function handleSimilarGameClick(similarGame) {
     const nameLower = similarGame.name?.trim().toLowerCase() || ""
@@ -1348,6 +1351,16 @@ export default function GameDetail() {
                     </button>
                   ) : (
                     <>
+                      {streamSource && (
+                        <button
+                          className="game-detail__play-btn game-detail__play-btn--stream"
+                          onClick={() => startStream(game)}
+                          title={`Play this game on ${streamSource.hostname} and stream it to this PC`}
+                        >
+                          <MonitorPlay size={20} />
+                          Stream from {streamSource.hostname}
+                        </button>
+                      )}
                       <button
                         className="game-detail__play-btn game-detail__play-btn--install"
                         onClick={handleInstall}

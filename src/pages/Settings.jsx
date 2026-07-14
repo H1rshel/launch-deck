@@ -44,7 +44,17 @@ import {
   Zap,
   Circle,
   CheckCircle,
+  MonitorPlay,
+  Laptop,
 } from "lucide-react"
+import {
+  getDeviceId,
+  getUserDevices,
+  removeDevice,
+  isDeviceOnline,
+  setDeviceStreamingFlags,
+} from "../lib/devices"
+import { provisionSunshineHost } from "../lib/streaming/provision"
 import SteamIconSolid from "../components/icons/SteamIconSolid"
 import GogIcon from "../components/icons/GogIcon"
 import EpicIcon from "../components/icons/EpicIcon"
@@ -1119,6 +1129,231 @@ function UpdatesSection() {
   )
 }
 
+const STREAM_RESOLUTIONS = [
+  { value: "1280x720", label: "720p" },
+  { value: "1920x1080", label: "1080p" },
+  { value: "2560x1440", label: "1440p" },
+  { value: "3840x2160", label: "4K" },
+]
+const STREAM_FPS = [
+  { value: 30, label: "30 FPS" },
+  { value: 60, label: "60 FPS" },
+  { value: 120, label: "120 FPS" },
+]
+const STREAM_BITRATES = [
+  { value: "auto", label: "Auto" },
+  { value: "10", label: "10 Mbps" },
+  { value: "20", label: "20 Mbps" },
+  { value: "40", label: "40 Mbps" },
+  { value: "80", label: "80 Mbps" },
+]
+
+const PROVISION_STEP_LABELS = {
+  checking: "Checking this PC…",
+  downloading: "Downloading streaming host…",
+  installing: "Installing (approve the Windows prompt)…",
+  verifying: "Verifying…",
+}
+
+function formatLastSeen(iso) {
+  if (!iso) return "never"
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+  if (mins < 3) return "online now"
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 48) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
+}
+
+function StreamingSection() {
+  const { user } = useAuth()
+  const { settings, setSetting } = useSettingsContext()
+  const { addNotification } = useNotifications()
+  const isTauri =
+    typeof window !== "undefined" &&
+    !!(window.__TAURI_INTERNALS__ || window.__TAURI__)
+
+  const [devices, setDevices] = useState([])
+  const [thisDeviceId, setThisDeviceId] = useState(null)
+  const [provisioning, setProvisioning] = useState(null) // { step, percent }
+
+  const refreshDevices = async () => {
+    if (!user?.id) return
+    const [list, deviceId] = await Promise.all([
+      getUserDevices(user.id),
+      getDeviceId(),
+    ])
+    setDevices(list)
+    setThisDeviceId(deviceId)
+  }
+
+  useEffect(() => {
+    refreshDevices()
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const thisDevice = devices.find((d) => d.device_id === thisDeviceId)
+  const hostEnabled = !!thisDevice?.streaming_host_enabled && !!thisDevice?.sunshine_provisioned
+
+  const toggleHost = async () => {
+    if (!user?.id || !isTauri || provisioning) return
+
+    if (hostEnabled) {
+      await setDeviceStreamingFlags(user.id, { hostEnabled: false })
+      await refreshDevices()
+      return
+    }
+
+    try {
+      setProvisioning({ step: "checking" })
+      await provisionSunshineHost(user.id, (p) => setProvisioning(p))
+      addNotification({
+        title: "Streaming host ready",
+        message: "Your other PCs can now stream games installed on this PC.",
+        type: "success",
+      })
+    } catch (err) {
+      console.error("Streaming host setup failed:", err)
+      addNotification({
+        title: "Streaming setup failed",
+        message: err?.message || "Could not set up the streaming host.",
+        type: "error",
+      })
+    } finally {
+      setProvisioning(null)
+      await refreshDevices()
+    }
+  }
+
+  const handleRemoveDevice = async (deviceId) => {
+    if (!user?.id) return
+    await removeDevice(user.id, deviceId)
+    await refreshDevices()
+  }
+
+  return (
+    <section
+      className="settings__section settings__section--animated settings__section--glass"
+      style={{ animationDelay: "300ms" }}
+    >
+      <div className="settings__section-header">
+        <MonitorPlay size={20} className="settings__section-icon" />
+        <div className="settings__section-header-text">
+          <h2 className="settings__section-title">Streaming</h2>
+          <p className="settings__section-description">
+            Play games installed on one PC from any of your other PCs. Setup is
+            automatic — no configuration or PINs needed.
+          </p>
+        </div>
+      </div>
+      <div className="settings__section-body">
+        <div className="setting-row">
+          <div className="setting-row__info">
+            <span className="setting-row__label">Stream games from this PC</span>
+            <span className="setting-row__desc">
+              {provisioning
+                ? `${PROVISION_STEP_LABELS[provisioning.step] || "Setting up…"}${
+                    provisioning.step === "downloading" && provisioning.percent != null
+                      ? ` ${provisioning.percent}%`
+                      : ""
+                  }`
+                : "Lets your other PCs play the games installed here (one-time setup, requires admin approval)"}
+            </span>
+          </div>
+          {provisioning ? (
+            <Loader size={18} className="settings__spinner" />
+          ) : (
+            <button
+              className={`setting-toggle ${hostEnabled ? "setting-toggle--on" : ""}`}
+              onClick={toggleHost}
+              disabled={!isTauri || !user}
+            >
+              <span className="setting-toggle__knob" />
+            </button>
+          )}
+        </div>
+
+        <div className="setting-row">
+          <div className="setting-row__info">
+            <span className="setting-row__label">Stream quality</span>
+            <span className="setting-row__desc">
+              Resolution, frame rate and bandwidth used when streaming TO this PC
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <Select
+              value={settings.streamResolution}
+              onChange={(v) => setSetting("streamResolution", v)}
+              options={STREAM_RESOLUTIONS}
+            />
+            <Select
+              value={settings.streamFps}
+              onChange={(v) => setSetting("streamFps", Number(v))}
+              options={STREAM_FPS}
+            />
+            <Select
+              value={settings.streamBitrate}
+              onChange={(v) => setSetting("streamBitrate", v)}
+              options={STREAM_BITRATES}
+            />
+          </div>
+        </div>
+
+        {devices.length > 0 && (
+          <div className="setting-row setting-row--block">
+            <div className="setting-row__info">
+              <span className="setting-row__label">Your PCs</span>
+              <span className="setting-row__desc">
+                Every PC signed into your account. Games installed on an online
+                PC with streaming enabled can be streamed to the others.
+              </span>
+            </div>
+            <div className="settings__device-list">
+              {devices.map((device) => {
+                const online = isDeviceOnline(device)
+                const isThis = device.device_id === thisDeviceId
+                return (
+                  <div key={device.device_id} className="settings__device-row">
+                    <Laptop size={18} className="settings__device-icon" />
+                    <div className="settings__device-info">
+                      <span className="settings__device-name">
+                        {device.hostname || "PC"}
+                        {isThis && <span className="settings__device-badge">This PC</span>}
+                        {device.streaming_host_enabled && device.sunshine_provisioned && (
+                          <span className="settings__device-badge settings__device-badge--host">
+                            Host
+                          </span>
+                        )}
+                      </span>
+                      <span className="settings__device-meta">
+                        {device.hardware?.gpu ? `${device.hardware.gpu} · ` : ""}
+                        {online ? "Online" : `Last seen ${formatLastSeen(device.last_seen)}`}
+                      </span>
+                    </div>
+                    <Circle
+                      size={10}
+                      className={`settings__device-dot ${online ? "settings__device-dot--online" : ""}`}
+                      fill="currentColor"
+                    />
+                    {!isThis && (
+                      <button
+                        className="settings__device-remove"
+                        title="Remove this PC from your account"
+                        onClick={() => handleRemoveDevice(device.device_id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export default function Settings() {
   const { signOut } = useAuth()
   const location = useLocation()
@@ -1374,6 +1609,8 @@ export default function Settings() {
         </section>
 
         <PlatformAccountsSection />
+
+        <StreamingSection />
 
         <UpdatesSection />
 

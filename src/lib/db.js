@@ -96,7 +96,7 @@ async function getDb() {
 
 // Bump this whenever a new CREATE/ALTER is added below, so the one-time
 // migration runs once more and then the fast path resumes.
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 // Ensures tables exist before any query — safe to call multiple times
 async function ensureTablesExist() {
@@ -269,6 +269,16 @@ async function ensureTablesExist() {
       cached_at TEXT DEFAULT '',
       stale_after TEXT DEFAULT '',
       PRIMARY KEY (game_id, provider)
+    )
+  `)
+
+  // Durable key/value store for app-level state (device id, streaming creds,
+  // sync markers). Lives in SQLite — unlike localStorage it survives WebView2
+  // profile resets.
+  await conn.execute(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT DEFAULT ''
     )
   `)
 
@@ -1242,6 +1252,72 @@ export async function clearGameDetailsCache(gameId, provider) {
   }
 
   memoryGameDetailsCache.delete(getMemoryGameDetailsCacheKey(gameId, provider))
+}
+
+/**
+ * All cached rows for one provider — used by metadata cloud sync to push the
+ * user's descriptions/metadata picks without a per-game query loop.
+ */
+export async function getAllGameDetailsCacheForProvider(provider) {
+  if (!provider) return []
+
+  if (isTauri) {
+    await ensureTablesExist()
+    const conn = await getDb()
+    const rows = await conn.select(
+      `SELECT game_id, provider, cache_key, payload_json, cached_at, stale_after
+       FROM game_details_cache
+       WHERE provider = $1`,
+      [provider],
+    )
+    const out = []
+    for (const row of rows) {
+      if (!row?.payload_json) continue
+      try {
+        out.push({
+          gameId: row.game_id,
+          provider: row.provider,
+          cacheKey: row.cache_key || '',
+          payload: JSON.parse(row.payload_json),
+          cachedAt: row.cached_at || '',
+          staleAfter: row.stale_after || '',
+        })
+      } catch { /* skip malformed rows */ }
+    }
+    return out
+  }
+
+  return [...memoryGameDetailsCache.values()].filter((e) => e.provider === provider)
+}
+
+// ─── App Meta (durable key/value store) ───
+
+let memoryAppMeta = new Map()
+
+export async function getAppMeta(key) {
+  if (!key) return null
+  if (isTauri) {
+    await ensureTablesExist()
+    const conn = await getDb()
+    const rows = await conn.select('SELECT value FROM app_meta WHERE key = $1', [key])
+    return rows[0]?.value ?? null
+  }
+  return memoryAppMeta.get(key) ?? null
+}
+
+export async function setAppMeta(key, value) {
+  if (!key) return
+  if (isTauri) {
+    await ensureTablesExist()
+    const conn = await getDb()
+    await conn.execute(
+      `INSERT INTO app_meta (key, value) VALUES ($1, $2)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [key, String(value ?? '')],
+    )
+    return
+  }
+  memoryAppMeta.set(key, String(value ?? ''))
 }
 
 export async function clearGameDetailsCacheByProviders(providers = []) {

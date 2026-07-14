@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { isSyncedSettingKey, queueSettingsPush, SETTINGS_UPDATED_EVENT } from '../lib/settingsSync'
 
 const PREFIX = 'ld_setting_'
 
@@ -25,6 +26,10 @@ export const SETTING_DEFAULTS = {
   updateMode: 'notify_only',
   includeBetaUpdates: false,
   lastUpdateCheckAt: null,
+  // Streaming (per-device — never synced; tuned to each client's display)
+  streamResolution: '1920x1080',
+  streamFps: 60,
+  streamBitrate: 'auto',
 }
 
 export function readSetting(key) {
@@ -89,11 +94,19 @@ export function useSettings() {
     syncCloseToTray(settings.closeToTray)
   }, [settings.closeToTray])
 
+  // Reload from localStorage after a cloud settings pull rewrites values.
+  useEffect(() => {
+    const onCloudUpdate = () => setSettings(loadAll())
+    window.addEventListener(SETTINGS_UPDATED_EVENT, onCloudUpdate)
+    return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, onCloudUpdate)
+  }, [])
+
   const setSetting = useCallback((key, value) => {
     try {
       localStorage.setItem(PREFIX + key, JSON.stringify(value))
     } catch {}
     setSettings(prev => ({ ...prev, [key]: value }))
+    if (isSyncedSettingKey(key)) queueSettingsPush()
   }, [])
 
   return { settings, setSetting }

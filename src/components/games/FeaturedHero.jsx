@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
-import { Play, Info, Star } from 'lucide-react'
+import { Play, Info, Star, MonitorPlay } from 'lucide-react'
 import { useGameContext } from '../../context/GameContext'
+import { useStreaming } from '../../context/StreamingContext'
 import { canInstallGame } from '../../lib/launcher'
 
 import { getGameImages } from '../../utils/imageHandler'
@@ -8,8 +9,10 @@ import { getGameImages } from '../../utils/imageHandler'
 export default function FeaturedHero({ game }) {
   const navigate = useNavigate()
   const { playGame, installGame } = useGameContext()
+  const { getStreamSource, startStream } = useStreaming()
 
   if (!game) return null
+  const streamSource = getStreamSource(game)
 
   const { hero, cover } = getGameImages(game)
   const bgImage = hero || cover
@@ -47,6 +50,15 @@ export default function FeaturedHero({ game }) {
             <button className="featured-hero__btn featured-hero__btn--play" onClick={handlePlay}>
               <Play size={20} fill="currentColor" />
               Play Now
+            </button>
+          ) : streamSource ? (
+            <button
+              className="featured-hero__btn featured-hero__btn--play"
+              onClick={() => startStream(game)}
+              title={`Play this game on ${streamSource.hostname} and stream it here`}
+            >
+              <MonitorPlay size={20} />
+              Stream from {streamSource.hostname}
             </button>
           ) : (
             <button

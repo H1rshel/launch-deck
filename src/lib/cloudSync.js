@@ -7,8 +7,39 @@ import {
 } from './db'
 import { backfillConfirmedGames } from './executableCatalog'
 import { tasteProfileService } from './tasteProfileService'
+import { pushGameMetadata, pullGameMetadata } from './metadataSync'
 
 let gamesTableSupportsUbisoftId = null
+
+// Customization columns added by the 2026-07 streaming/multi-PC migration.
+// If the cloud `games` table doesn't have them yet, we strip them and keep
+// syncing the legacy payload instead of failing the whole sync.
+const CUSTOMIZATION_COLUMNS = [
+  'hero_position',
+  'favorite',
+  'user_collection',
+  'rating',
+  'release_date',
+  'franchise',
+  'franchise_slug',
+  'genres',
+  'themes',
+  'developers',
+  'publishers',
+  'collections',
+  'franchises',
+  'imported_playtime_minutes',
+]
+let gamesTableSupportsCustomization = null
+
+// Local games from getAllGames() are enriched for the UI (genres/themes/... as
+// arrays), but SQLite + the cloud table store them as raw CSV/JSON strings.
+// Normalize back to strings before building payloads.
+function asStoredString(value) {
+  if (value == null || value === '') return null
+  if (Array.isArray(value)) return value.join(',')
+  return String(value)
+}
 
 // ── Per-session write guards ──────────────────────────────────────────────────
 // Prevents EXE backfill from running on every sync cycle.
@@ -38,7 +69,36 @@ function buildCloudGamePayload(game, userId, includeUbisoftId = true) {
     payload.ubisoft_id = game.ubisoft_id || null
   }
 
+  if (gamesTableSupportsCustomization !== false) {
+    payload.hero_position = game.hero_position || null
+    payload.favorite = !!game.favorite
+    payload.user_collection = game.user_collection || null
+    payload.rating = game.rating || null
+    payload.release_date = game.release_date || null
+    payload.franchise = game.franchise || null
+    payload.franchise_slug = game.franchise_slug || null
+    payload.genres = asStoredString(game.genres)
+    payload.themes = asStoredString(game.themes)
+    payload.developers = asStoredString(game.developers)
+    payload.publishers = asStoredString(game.publishers)
+    payload.collections = game.collections || null
+    payload.franchises = game.franchises || null
+    payload.imported_playtime_minutes = game.imported_playtime_minutes || 0
+  }
+
   return payload
+}
+
+function isMissingCustomizationColumn(error) {
+  if (error?.code !== 'PGRST204') return false
+  const msg = error?.message || ''
+  return CUSTOMIZATION_COLUMNS.some((col) => msg.includes(col))
+}
+
+function stripCustomizationColumns(payload) {
+  const out = { ...payload }
+  for (const col of CUSTOMIZATION_COLUMNS) delete out[col]
+  return out
 }
 
 function isMissingUbisoftColumn(error) {
@@ -59,9 +119,23 @@ async function upsertCloudGames(gamesToUpsert) {
     .from('games')
     .upsert(payload, { onConflict: 'user_id,game_id' })
 
+  if (error && gamesTableSupportsCustomization !== false && isMissingCustomizationColumn(error)) {
+    // Cloud migration not applied yet — retry without the new columns.
+    gamesTableSupportsCustomization = false
+    console.warn('Cloud games table is missing customization columns — run the Supabase migration to sync image positions, favorites and collections across PCs.')
+    const fallbackPayload = payload.map(stripCustomizationColumns)
+    const retry = await supabase
+      .from('games')
+      .upsert(fallbackPayload, { onConflict: 'user_id,game_id' })
+    error = retry.error
+    payload = fallbackPayload
+  } else if (!error) {
+    gamesTableSupportsCustomization = true
+  }
+
   if (error && includeUbisoftId && isMissingUbisoftColumn(error)) {
     gamesTableSupportsUbisoftId = false
-    const fallbackPayload = gamesToUpsert.map(({ ubisoft_id, ...game }) => game)
+    const fallbackPayload = payload.map(({ ubisoft_id, ...game }) => game)
     const retry = await supabase
       .from('games')
       .upsert(fallbackPayload, { onConflict: 'user_id,game_id' })
@@ -158,10 +232,21 @@ export async function syncLocalToCloud(userId) {
 
   window.dispatchEvent(new CustomEvent('cloud-sync-start'))
   try {
-    const { data: cloudGames, error } = await supabase
+    // Fetch the comparison columns (cover for the image backfill, favorite as
+    // a "customization columns ever synced?" probe). Falls back to the legacy
+    // column list when the cloud migration hasn't been applied yet.
+    let { data: cloudGames, error } = await supabase
     .from('games')
-    .select('game_id, updated_at')
+    .select('game_id, updated_at, cover_url, favorite')
     .eq('user_id', userId)
+
+  if (error) {
+    ;({ data: cloudGames, error } = await supabase
+      .from('games')
+      .select('game_id, updated_at, cover_url')
+      .eq('user_id', userId))
+    if (!error) gamesTableSupportsCustomization = false
+  }
 
   if (error) {
     console.error('syncLocalToCloud: Failed to fetch cloud games', error)
@@ -186,8 +271,17 @@ export async function syncLocalToCloud(userId) {
     
     // If Supabase was just updated with new schema, migrating local images up.
     const needsImagePush = cloudGame && !cloudGame.cover_url && game.cover_url
-    
-    if (!cloudGame || localUpdated > cloudUpdated || needsImagePush) {
+
+    // One-shot backfill: the customization columns were just added (favorite
+    // is null on every pre-migration row), so push rows whose local copy has
+    // customizations even though updated_at hasn't moved.
+    const needsCustomizationPush =
+      gamesTableSupportsCustomization !== false &&
+      cloudGame &&
+      cloudGame.favorite === null &&
+      !!(game.favorite || game.hero_position || game.user_collection || game.franchise || game.genres?.length)
+
+    if (!cloudGame || localUpdated > cloudUpdated || needsImagePush || needsCustomizationPush) {
       gamesToUpsert.push(buildCloudGamePayload({
         ...game,
         updated_at: localUpdatedStr,
@@ -203,13 +297,40 @@ export async function syncLocalToCloud(userId) {
     }
   }
 
-  // Refresh profile upon outbound delta push explicitly 
+  // Sync the descriptions / chosen-metadata payloads alongside the games
+  await pushGameMetadata(userId)
+
+  // Refresh profile upon outbound delta push explicitly
   await tasteProfileService.buildAndUpsertTasteProfile(userId)
 } catch (err) {
   console.error('syncLocalToCloud: Error', err)
 } finally {
   window.dispatchEvent(new CustomEvent('cloud-sync-end'))
 }
+}
+
+/**
+ * Maps cloud customization columns to a local UPDATE object. Null cloud
+ * values mean "never synced" (pre-migration rows) and are skipped so they
+ * can't wipe local customizations.
+ */
+function buildLocalCustomizationUpdates(cg) {
+  const updates = {}
+  if (cg.hero_position != null) updates.hero_position = cg.hero_position
+  if (cg.favorite != null) updates.favorite = cg.favorite ? 1 : 0
+  if (cg.user_collection != null) updates.user_collection = cg.user_collection
+  if (cg.rating != null) updates.rating = cg.rating
+  if (cg.release_date != null) updates.release_date = cg.release_date
+  if (cg.franchise != null) updates.franchise = cg.franchise
+  if (cg.franchise_slug != null) updates.franchise_slug = cg.franchise_slug
+  if (cg.genres != null) updates.genres = cg.genres
+  if (cg.themes != null) updates.themes = cg.themes
+  if (cg.developers != null) updates.developers = cg.developers
+  if (cg.publishers != null) updates.publishers = cg.publishers
+  if (cg.collections != null) updates.collections = cg.collections
+  if (cg.franchises != null) updates.franchises = cg.franchises
+  if (cg.imported_playtime_minutes != null) updates.imported_playtime_minutes = cg.imported_playtime_minutes
+  return updates
 }
 
 /**
@@ -292,7 +413,7 @@ export async function syncCloudToLocal(userId) {
         const isEpic = cg.game_id.startsWith('epic_')
         const isUbisoft = cg.game_id.startsWith('ubisoft_')
 
-        await addGame({
+        const added = await addGame({
           id: cg.game_id,
           title: cg.title,
           install_path: '',
@@ -314,6 +435,13 @@ export async function syncCloudToLocal(userId) {
           updated_at: cg.updated_at,
         })
         addedCount++
+
+        // Apply synced customizations (image position, favorite, collection,
+        // metadata fields) so a fresh PC mirrors the main PC immediately.
+        const customUpdates = buildLocalCustomizationUpdates(cg)
+        if (Object.keys(customUpdates).length > 0) {
+          await updateGame(added.id, { ...customUpdates, updated_at: cg.updated_at })
+        }
 
         // Register in the title map so a subsequent cloud entry for the same game
         // (different ID, same title — e.g. a PC-scan duplicate) won't be inserted again.
@@ -343,7 +471,8 @@ export async function syncCloudToLocal(userId) {
           steam_app_id: cg.steam_app_id || localGame.steam_app_id,
           gog_id: cg.gog_id || localGame.gog_id,
           epic_id: cg.epic_id || localGame.epic_id,
-          ubisoft_id: cg.ubisoft_id || localGame.ubisoft_id
+          ubisoft_id: cg.ubisoft_id || localGame.ubisoft_id,
+          ...buildLocalCustomizationUpdates(cg),
         })
       }
     }
@@ -364,6 +493,9 @@ export async function syncCloudToLocal(userId) {
       console.warn('[cloudSync] EXE backfill failed (non-fatal):', err?.message ?? err)
     })
   }
+
+  // Pull descriptions / chosen-metadata payloads for the library
+  await pullGameMetadata(userId)
 
   // Sync is completed - re-derive taste profile for server logic ranking feeds
   await tasteProfileService.buildAndUpsertTasteProfile(userId)

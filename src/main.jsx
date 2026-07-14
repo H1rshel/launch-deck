@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { SettingsProvider } from './context/SettingsContext'
 import { AuthProvider } from './context/AuthContext'
 import { GameProvider } from './context/GameContext'
+import { StreamingProvider } from './context/StreamingContext'
 import { NotificationProvider } from './context/NotificationContext'
 import App from './App'
 import AppErrorBoundary, { StartupRecoveryScreen } from './components/ui/AppErrorBoundary'
@@ -47,7 +48,9 @@ root.render(
           <AuthProvider>
             <NotificationProvider>
               <GameProvider>
-                <App />
+                <StreamingProvider>
+                  <App />
+                </StreamingProvider>
               </GameProvider>
             </NotificationProvider>
           </AuthProvider>

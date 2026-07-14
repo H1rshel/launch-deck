@@ -36,6 +36,13 @@ import {
   syncLocalToCloud,
   queueSyncLocalToCloud,
 } from "../lib/cloudSync";
+import {
+  registerDevice,
+  startHeartbeat,
+  stopHeartbeat,
+  pushInstallMap,
+} from "../lib/devices";
+import { pullSettings } from "../lib/settingsSync";
 import { submitExecutableFeedback } from "../lib/executableCatalog";
 import { classifyDeletionReason } from "../lib/executableNorm";
 import DeleteFeedbackModal from "../components/games/DeleteFeedbackModal";
@@ -130,6 +137,13 @@ export function GameProvider({ children }) {
   }, []);
 
   const [isEnriching, setIsEnriching] = useState(false);
+
+  // The 5-min sync interval captures the initial runSync closure, so it must
+  // read the user through a ref to see logins that happened after mount.
+  const userIdRef = useRef(null);
+  useEffect(() => {
+    userIdRef.current = user?.id ?? null;
+  }, [user?.id]);
 
   // Toast shown when new games are auto-detected
   const [syncToast, setSyncToast] = useState(null);
@@ -406,6 +420,9 @@ export function GameProvider({ children }) {
           image: imageUrl,
         });
       }
+      // Publish this PC's installed-games map so other devices can offer
+      // "Stream from this PC" (hash-diffed — no-op when nothing changed).
+      if (userIdRef.current) pushInstallMap(userIdRef.current).catch(() => {});
     } catch (err) {
       console.warn("Library sync error:", err);
     } finally {
@@ -470,6 +487,17 @@ export function GameProvider({ children }) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Register this PC + start its heartbeat, and pull synced settings, as soon
+  // as we know the user. Independent of the games sync below.
+  useEffect(() => {
+    if (!user || loading) return undefined;
+    pullSettings(user.id).catch(() => {});
+    registerDevice(user.id)
+      .then(() => startHeartbeat(user.id))
+      .catch(() => {});
+    return () => stopHeartbeat();
+  }, [user, loading]);
+
   // Handle cloud sync when user logs in or DB finishes loading
   useEffect(() => {
     let mounted = true;
@@ -478,6 +506,7 @@ export function GameProvider({ children }) {
         try {
           const syncResult = await syncCloudToLocal(user.id);
           await syncLocalToCloud(user.id);
+          pushInstallMap(user.id).catch(() => {});
           if (mounted) {
             const currentGames = await getAllGames();
             setGames(currentGames);
@@ -539,7 +568,14 @@ export function GameProvider({ children }) {
       try {
         await dbUpdate(id, updates);
         await refreshGames();
-        if (user) queueSyncLocalToCloud(user.id);
+        if (user) {
+          queueSyncLocalToCloud(user.id);
+          // Install-state changes (Locate flow, uninstall detection) must
+          // reach the per-device install map for streaming availability.
+          if (updates.status || updates.install_path !== undefined) {
+            pushInstallMap(user.id).catch(() => {});
+          }
+        }
       } catch (err) {
         console.error("Failed to update game:", err);
         throw err;
@@ -569,7 +605,10 @@ export function GameProvider({ children }) {
       try {
         await dbRemove(id);
         setGames((prev) => prev.filter((g) => g.id !== id));
-        if (user) queueSyncLocalToCloud(user.id);
+        if (user) {
+          queueSyncLocalToCloud(user.id);
+          pushInstallMap(user.id).catch(() => {});
+        }
 
         // Persist user feedback to Supabase (non-blocking)
         if (user && game?.install_path) {
