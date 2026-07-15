@@ -105,14 +105,44 @@ function isMissingUbisoftColumn(error) {
   return error?.code === 'PGRST204' && /ubisoft_id/i.test(error?.message || '')
 }
 
+/**
+ * Two local rows can map to the same cloud game_id (e.g. a user-removed
+ * `steam_123` entry plus a folder-scanned copy of the same game). Postgres
+ * rejects a batch upsert that touches one conflict key twice (error 21000,
+ * "ON CONFLICT DO UPDATE command cannot affect row a second time") — and one
+ * such pair silently killed EVERY sync of the whole library. Keep the live
+ * row over the deleted one, then the newest.
+ */
+function dedupeByCloudGameId(rows) {
+  const byId = new Map()
+  for (const row of rows) {
+    const existing = byId.get(row.game_id)
+    if (!existing) {
+      byId.set(row.game_id, row)
+      continue
+    }
+    let winner
+    if (!!existing.deleted !== !!row.deleted) {
+      winner = existing.deleted ? row : existing
+    } else {
+      winner =
+        String(row.updated_at || '') > String(existing.updated_at || '')
+          ? row
+          : existing
+    }
+    byId.set(row.game_id, winner)
+  }
+  return [...byId.values()]
+}
+
 async function upsertCloudGames(gamesToUpsert) {
   if (gamesToUpsert.length === 0) return null
 
   const includeUbisoftId = gamesTableSupportsUbisoftId !== false
-  let payload = gamesToUpsert
+  let payload = dedupeByCloudGameId(gamesToUpsert)
 
   if (!includeUbisoftId) {
-    payload = gamesToUpsert.map(({ ubisoft_id, ...game }) => game)
+    payload = payload.map(({ ubisoft_id, ...game }) => game)
   }
 
   let { error } = await supabase
@@ -145,6 +175,23 @@ async function upsertCloudGames(gamesToUpsert) {
   }
 
   return error
+}
+
+/**
+ * A failed push means the cloud (and every other PC) silently drifts from
+ * this library — that must be user-visible, not just a console line.
+ * GameContext listens for this and raises a notification.
+ */
+function reportSyncFailure(error) {
+  if (!error) return
+  console.error('Cloud sync push failed:', error)
+  try {
+    window.dispatchEvent(
+      new CustomEvent('cloud-sync-failed', {
+        detail: { message: error.message || String(error) },
+      }),
+    )
+  } catch { /* non-browser context */ }
 }
 
 /**
@@ -209,9 +256,9 @@ export async function initialSync(userId) {
 
   if (gamesToUpsert.length > 0) {
     const upsertError = await upsertCloudGames(gamesToUpsert)
-      
+
     if (upsertError) {
-      console.error('Initial sync: Failed to upsert games', upsertError)
+      reportSyncFailure(upsertError)
     } else {
       console.log(`Initial sync: Upserted ${gamesToUpsert.length} games to cloud.`)
     }
@@ -237,13 +284,13 @@ export async function syncLocalToCloud(userId) {
     // column list when the cloud migration hasn't been applied yet.
     let { data: cloudGames, error } = await supabase
     .from('games')
-    .select('game_id, updated_at, cover_url, favorite')
+    .select('game_id, updated_at, cover_url, favorite, deleted')
     .eq('user_id', userId)
 
   if (error) {
     ;({ data: cloudGames, error } = await supabase
       .from('games')
-      .select('game_id, updated_at, cover_url')
+      .select('game_id, updated_at, cover_url, deleted')
       .eq('user_id', userId))
     if (!error) gamesTableSupportsCustomization = false
   }
@@ -270,7 +317,9 @@ export async function syncLocalToCloud(userId) {
     const cloudUpdated = new Date(cloudUpdatedStr).getTime()
     
     // If Supabase was just updated with new schema, migrating local images up.
-    const needsImagePush = cloudGame && !cloudGame.cover_url && game.cover_url
+    // Never backfill onto a deleted cloud row — a force-push ignores LWW and
+    // would resurrect a game another PC deliberately removed.
+    const needsImagePush = cloudGame && !cloudGame.deleted && !cloudGame.cover_url && game.cover_url
 
     // One-shot backfill: the customization columns were just added (favorite
     // is null on every pre-migration row), so push rows whose local copy has
@@ -278,6 +327,7 @@ export async function syncLocalToCloud(userId) {
     const needsCustomizationPush =
       gamesTableSupportsCustomization !== false &&
       cloudGame &&
+      !cloudGame.deleted &&
       cloudGame.favorite === null &&
       !!(game.favorite || game.hero_position || game.user_collection || game.franchise || game.genres?.length)
 
@@ -289,11 +339,28 @@ export async function syncLocalToCloud(userId) {
     }
   }
 
+  // Tombstone orphaned cloud rows from cloud-id drift: a game first pushed
+  // under its local path id that later gained a store id maps to a NEW cloud
+  // game_id — the old row would otherwise live on as a phantom "active"
+  // game on every other PC.
+  const localById = new Map(combinedLocalGames.map((g) => [g.id, g]))
+  for (const cg of cloudGames) {
+    if (cg.deleted) continue
+    const owner = localById.get(cg.game_id)
+    if (!owner || getCloudGameId(owner) === cg.game_id) continue
+    gamesToUpsert.push({
+      ...buildCloudGamePayload(owner, userId),
+      game_id: cg.game_id,
+      deleted: true,
+      updated_at: new Date().toISOString(),
+    })
+  }
+
   if (gamesToUpsert.length > 0) {
     const upsertError = await upsertCloudGames(gamesToUpsert)
 
     if (upsertError) {
-      console.error('syncLocalToCloud: Failed to upsert games', upsertError)
+      reportSyncFailure(upsertError)
     }
   }
 
@@ -402,8 +469,17 @@ export async function syncCloudToLocal(userId) {
       if (cloudNormTitle) localGame = localByNormTitle.get(cloudNormTitle)
     }
 
+    // A deleted cloud row only applies to a local game that CANONICALLY maps
+    // to that game_id. The id-fallback above can match a live game by its
+    // local path id even though the game now syncs under a store id — that
+    // cloud row is an obsolete alias (tombstoned by syncLocalToCloud), and
+    // applying its deleted flag would wipe the real game.
+    if (localGame && cg.deleted && getCloudGameId(localGame) !== cg.game_id) {
+      continue
+    }
+
     const cloudUpdated = new Date(cg.updated_at || new Date(0)).getTime()
-    
+
     if (!localGame) {
       // Cloud game fully missing locally -> INSERT as not installed
       if (!cg.deleted) {

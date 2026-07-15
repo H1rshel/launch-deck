@@ -13,33 +13,41 @@ const HEARTBEAT_INTERVAL_MS = 60 * 1000
 const DEVICE_ID_KEY = 'device_id'
 const INSTALL_MAP_HASH_KEY = 'install_map_hash'
 
-let cachedDeviceId = null
+let deviceIdPromise = null
 
 /**
  * Stable per-install device identity. Generated once and persisted in the
  * SQLite app_meta table (survives WebView2 profile resets, unlike
  * localStorage). Browser dev mode falls back to localStorage.
+ *
+ * Single-flight: on first launch many callers (registration, heartbeat,
+ * command listener, install map) race here before anything is persisted —
+ * without sharing one promise each raced caller minted its own UUID and the
+ * device registered multiple times.
  */
-export async function getDeviceId() {
-  if (cachedDeviceId) return cachedDeviceId
-
-  if (!isTauri) {
-    let id = localStorage.getItem('ld_device_id')
-    if (!id) {
-      id = crypto.randomUUID()
-      localStorage.setItem('ld_device_id', id)
-    }
-    cachedDeviceId = id
-    return id
+export function getDeviceId() {
+  if (!deviceIdPromise) {
+    deviceIdPromise = (async () => {
+      if (!isTauri) {
+        let id = localStorage.getItem('ld_device_id')
+        if (!id) {
+          id = crypto.randomUUID()
+          localStorage.setItem('ld_device_id', id)
+        }
+        return id
+      }
+      let id = await getAppMeta(DEVICE_ID_KEY)
+      if (!id) {
+        id = crypto.randomUUID()
+        await setAppMeta(DEVICE_ID_KEY, id)
+      }
+      return id
+    })()
+    deviceIdPromise.catch(() => {
+      deviceIdPromise = null // allow retry if the DB wasn't ready yet
+    })
   }
-
-  let id = await getAppMeta(DEVICE_ID_KEY)
-  if (!id) {
-    id = crypto.randomUUID()
-    await setAppMeta(DEVICE_ID_KEY, id)
-  }
-  cachedDeviceId = id
-  return id
+  return deviceIdPromise
 }
 
 async function getHostname() {

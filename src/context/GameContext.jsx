@@ -136,6 +136,23 @@ export function GameProvider({ children }) {
     };
   }, []);
 
+  // A failed cloud push means other PCs stop receiving this library's
+  // changes — surface it instead of letting syncs fail silently for weeks.
+  useEffect(() => {
+    const handleFailure = (event) => {
+      addNotification({
+        title: "Cloud sync problem",
+        message:
+          "Your library changes could not be uploaded, so other PCs may be out of date. " +
+          (event.detail?.message || ""),
+        type: "error",
+        dedupeKey: "cloud-sync-failed",
+      });
+    };
+    window.addEventListener("cloud-sync-failed", handleFailure);
+    return () => window.removeEventListener("cloud-sync-failed", handleFailure);
+  }, [addNotification]);
+
   const [isEnriching, setIsEnriching] = useState(false);
 
   // The 5-min sync interval captures the initial runSync closure, so it must
