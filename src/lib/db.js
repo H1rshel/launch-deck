@@ -601,6 +601,7 @@ export async function addGame({
   hero_url,
   logo_url,
   normalized_title,
+  created_at,
 }) {
   // Derive ID from exact pass, or default to slugified path/title
   let resolvedId = id ? String(id) : null
@@ -703,6 +704,7 @@ export async function addGame({
     franchises: existing?.franchises || "",
     imported_playtime_minutes: existing?.imported_playtime_minutes || 0,
     user_collection: existing?.user_collection || "",
+    created_at: created_at !== undefined ? created_at : (existing?.created_at || ""),
   }
 
   if (isTauri) {

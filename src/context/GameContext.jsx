@@ -515,6 +515,29 @@ export function GameProvider({ children }) {
     return () => stopHeartbeat();
   }, [user, loading]);
 
+  // Periodic CLOUD sync (pull + push). The login-time sync alone meant a
+  // running app never received changes made from another PC — deletions and
+  // customizations only landed after a restart.
+  useEffect(() => {
+    if (!user || loading) return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        await syncCloudToLocal(user.id);
+        await syncLocalToCloud(user.id);
+        if (!cancelled) await refreshGames();
+      } catch (err) {
+        console.debug("Periodic cloud sync failed (offline?):", err?.message);
+      }
+    };
+    const interval = setInterval(tick, SYNC_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [user, loading, refreshGames]);
+
   // Handle cloud sync when user logs in or DB finishes loading
   useEffect(() => {
     let mounted = true;

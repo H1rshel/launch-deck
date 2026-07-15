@@ -29,6 +29,7 @@ const CUSTOMIZATION_COLUMNS = [
   'collections',
   'franchises',
   'imported_playtime_minutes',
+  'added_at',
 ]
 let gamesTableSupportsCustomization = null
 
@@ -86,6 +87,9 @@ function buildCloudGamePayload(game, userId, includeUbisoftId = true) {
     payload.collections = game.collections || null
     payload.franchises = game.franchises || null
     payload.imported_playtime_minutes = game.imported_playtime_minutes || 0
+    // Date the game was first added — keeps "Latest Added" identical on
+    // every PC instead of reflecting each PC's own install date.
+    payload.added_at = game.created_at || null
   }
 
   return payload
@@ -286,7 +290,7 @@ export async function syncLocalToCloud(userId) {
     // column list when the cloud migration hasn't been applied yet.
     let { data: cloudGames, error } = await supabase
     .from('games')
-    .select('game_id, updated_at, cover_url, favorite, deleted')
+    .select('game_id, updated_at, cover_url, favorite, deleted, added_at')
     .eq('user_id', userId)
 
   if (error) {
@@ -336,7 +340,30 @@ export async function syncLocalToCloud(userId) {
       cloudGame.favorite === null &&
       !!(game.favorite || game.hero_position || game.user_collection)
 
-    if (!cloudGame || localUpdated > cloudUpdated || needsImagePush || needsCustomizationPush) {
+    // One-shot backfill for the added_at column (LWW never touches rows
+    // that haven't changed, so existing libraries need this nudge once).
+    const needsAddedAtPush =
+      gamesTableSupportsCustomization !== false &&
+      cloudGame &&
+      !cloudGame.deleted &&
+      cloudGame.added_at === null &&
+      !!game.created_at
+
+    // Mirror of the pull-side rule: an ACTIVE, NON-INSTALLED local copy must
+    // never push over a cloud deletion — background touches (enrichment,
+    // badge clearing) bump updated_at and would out-timestamp a deliberate
+    // removal made on another PC. Skip the push; the pull adopts the
+    // deletion. Installed games keep normal LWW protection.
+    if (
+      cloudGame?.deleted &&
+      !game.deleted &&
+      !game.user_removed &&
+      game.status !== 'installed'
+    ) {
+      continue
+    }
+
+    if (!cloudGame || localUpdated > cloudUpdated || needsImagePush || needsCustomizationPush || needsAddedAtPush) {
       gamesToUpsert.push(buildCloudGamePayload({
         ...game,
         updated_at: localUpdatedStr,
@@ -403,6 +430,18 @@ function buildLocalCustomizationUpdates(cg) {
   if (cg.franchises != null) updates.franchises = cg.franchises
   if (cg.imported_playtime_minutes != null) updates.imported_playtime_minutes = cg.imported_playtime_minutes
   return updates
+}
+
+/**
+ * "Date added" converges on the EARLIEST value either side knows — the
+ * cloud value comes from the PC that originally added the game, while a
+ * secondary PC only knows its own insert date.
+ */
+function pickEarliestAddedAt(cg, localGame) {
+  if (!cg.added_at) return undefined
+  const local = localGame?.created_at || ''
+  if (!local || cg.added_at < local) return cg.added_at
+  return undefined
 }
 
 /**
@@ -514,6 +553,7 @@ export async function syncCloudToLocal(userId) {
           progress_percent: cg.progress_percent || 0,
           last_played: cg.last_played || '',
           updated_at: cg.updated_at,
+          created_at: cg.added_at || cg.updated_at || '',
         })
         addedCount++
 
@@ -534,6 +574,16 @@ export async function syncCloudToLocal(userId) {
       // Game exists locally, compare updated timestamps
       const localUpdated = new Date(localGame.updated_at || new Date(0)).getTime()
       
+      // Date-added convergence is independent of LWW — apply whenever the
+      // cloud knows an earlier origin date than this PC does.
+      const earlierAddedAt = pickEarliestAddedAt(cg, localGame)
+      if (earlierAddedAt && !(cloudUpdated > localUpdated)) {
+        await updateGame(localGame.id, {
+          created_at: earlierAddedAt,
+          updated_at: localGame.updated_at, // don't disturb LWW state
+        })
+      }
+
       if (cloudUpdated > localUpdated) {
         // Cloud is newer -> UPDATE local
         await updateGame(localGame.id, {
@@ -554,6 +604,7 @@ export async function syncCloudToLocal(userId) {
           epic_id: cg.epic_id || localGame.epic_id,
           ubisoft_id: cg.ubisoft_id || localGame.ubisoft_id,
           ...buildLocalCustomizationUpdates(cg),
+          ...(earlierAddedAt ? { created_at: earlierAddedAt } : {}),
         })
       } else if (
         cg.deleted &&
