@@ -19952,3 +19952,22 @@ h6 {
   color: #f43f5e;
   background: rgba(244, 63, 94, 0.12);
 }
+
+/* Streaming device list — badge/online polish (v0.1.57) */
+.settings__device-badge {
+  background: rgba(0, 212, 255, 0.16);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+}
+.settings__device-badge--host {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.25), rgba(123, 47, 247, 0.25));
+  color: #fff;
+  border: 1px solid rgba(0, 212, 255, 0.5);
+}
+.settings__device-meta--online {
+  color: #22c55e;
+  font-weight: 600;
+}
+.settings__device-dot--online {
+  filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.9));
+}

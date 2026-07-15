@@ -7004,6 +7004,14 @@ fn main() {
     configure_webview2_startup();
 
     tauri::Builder::default()
+        // MUST be the first plugin: a second launch (e.g. the OS handing us a
+        // launchdeck:// OAuth callback) forwards its args to the running
+        // instance and exits, instead of opening a duplicate window. The
+        // "deep-link" feature re-emits forwarded URLs through the deep-link
+        // plugin so onOpenUrl fires in the existing instance.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_deep_link::init())

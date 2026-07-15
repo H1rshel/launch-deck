@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { supabase } from '../lib/supabase'
 import { useNotifications } from '../context/NotificationContext'
 import { filterAccurateDeals } from '../lib/dealMatching'
+import { queueSettingsPush } from '../lib/settingsSync'
 
 export const PRICE_SNAPSHOT_KEY = 'launchdeck_price_snapshot_v2'
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -141,6 +142,8 @@ export function usePriceWatcher(user) {
           lastChecked: new Date().toISOString(),
           games: newGames,
         }))
+        // Sync the snapshot so a reinstall doesn't re-announce known deals
+        queueSettingsPush()
 
         // Notify other components that prices were updated
         window.dispatchEvent(new CustomEvent('price-snapshot-updated'))

@@ -34,6 +34,9 @@ export const SYNCED_RAW_KEYS = [
   'ubisoftAccountId',
   'ubisoftUsername',
   'ubisoftAvatarUrl',
+  // Price-deal notification memory — without syncing it, every fresh
+  // install re-announces sales the user was already told about.
+  'launchdeck_price_snapshot_v2',
 ]
 
 const SETTING_PREFIX = 'ld_setting_'

@@ -1326,7 +1326,11 @@ function StreamingSection() {
                       </span>
                       <span className="settings__device-meta">
                         {device.hardware?.gpu ? `${device.hardware.gpu} · ` : ""}
-                        {online ? "Online" : `Last seen ${formatLastSeen(device.last_seen)}`}
+                        {online ? (
+                          <span className="settings__device-meta--online">Online</span>
+                        ) : (
+                          `Last seen ${formatLastSeen(device.last_seen)}`
+                        )}
                       </span>
                     </div>
                     <Circle

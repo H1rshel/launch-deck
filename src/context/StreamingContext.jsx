@@ -13,6 +13,7 @@ import { getDeviceId, getStreamSourceMap } from '../lib/devices'
 import { startCommandListener } from '../lib/streaming/commandBus'
 import { createHostHandlers } from '../lib/streaming/streamingHost'
 import { streamGame, cancelStream } from '../lib/streaming/streamingClient'
+import { ensureMoonlightClient } from '../lib/streaming/provision'
 
 const isTauri =
   typeof window !== 'undefined' &&
@@ -78,6 +79,18 @@ export function StreamingProvider({ children }) {
       window.removeEventListener('focus', onFocus)
     }
   }, [user?.id, refreshStreamSources])
+
+  // Pre-provision the Moonlight client in the background as soon as any game
+  // is streamable — the ~120MB download/extract otherwise lands on the first
+  // Stream click and makes it feel broken-slow.
+  const moonlightPrefetchRef = useRef(false)
+  useEffect(() => {
+    if (!isTauri || moonlightPrefetchRef.current || sourceMap.size === 0) return
+    moonlightPrefetchRef.current = true
+    ensureMoonlightClient().catch(() => {
+      moonlightPrefetchRef.current = false // retry on the next refresh
+    })
+  }, [sourceMap])
 
   // Host side: answer pairing/stream requests from the user's other PCs.
   useEffect(() => {
