@@ -83,14 +83,33 @@ export async function provisionSunshineHost(userId, onProgress = () => {}) {
   const { username, password } = await getSunshineCreds()
 
   // Already installed + our creds already work → nothing to do.
+  // CAUTION: an unconfigured Sunshine (fresh state, no account yet) answers
+  // the API without auth, so a plain success is not proof our credentials
+  // are installed. Probe with bogus creds — if those ALSO work, Sunshine is
+  // unconfigured and we must still run the credential setup.
   if (alreadyInstalled) {
     const serviceUp = await invoke('is_sunshine_service_running')
     if (serviceUp) {
       try {
         await sunshineApi('GET', '/api/apps')
-        onProgress({ step: 'done' })
-        await setDeviceStreamingFlags(userId, { hostEnabled: true, provisioned: true })
-        return
+        let unconfigured = false
+        try {
+          await invoke('sunshine_api', {
+            method: 'GET',
+            path: '/api/apps',
+            body: null,
+            username: 'ld_probe',
+            password: 'definitely-wrong',
+          })
+          unconfigured = true
+        } catch {
+          // Bogus creds rejected — auth is real, our creds are in place.
+        }
+        if (!unconfigured) {
+          onProgress({ step: 'done' })
+          await setDeviceStreamingFlags(userId, { hostEnabled: true, provisioned: true })
+          return
+        }
       } catch {
         // Installed but our creds don't work yet — fall through to set them.
       }

@@ -569,12 +569,15 @@ export async function backfillGameMetadata() {
 }
 
 export async function getDeletedGames() {
+  // Includes user_removed rows even when deleted=0: cloud sync matches
+  // against this set, and a hidden row that sync can't see gets re-created
+  // as a fresh visible duplicate when its cloud twin is still active.
   if (isTauri) {
     await ensureTablesExist()
     const conn = await getDb()
-    return conn.select("SELECT * FROM games WHERE deleted = 1")
+    return conn.select("SELECT * FROM games WHERE deleted = 1 OR user_removed = 1")
   }
-  return getMemoryStore().filter(g => g.deleted)
+  return getMemoryStore().filter(g => g.deleted || g.user_removed)
 }
 
 export async function addGame({

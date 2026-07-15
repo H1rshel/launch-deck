@@ -150,6 +150,16 @@ export function createHostHandlers({ userId, notify = () => {} }) {
           lastError = new Error('Sunshine rejected the pairing PIN')
         } catch (err) {
           lastError = err
+          if (String(err?.message || '').includes('401')) {
+            // Credentials drift — retrying won't help; tell both sides.
+            notify({
+              title: 'Streaming needs repair',
+              message: 'The streaming service rejected Launch Deck’s credentials. Toggle streaming OFF and ON in Settings → Streaming to repair it.',
+            })
+            const authErr = new Error('The host’s streaming service needs repair — on the host PC, toggle streaming off and on in Settings → Streaming')
+            authErr.code = 'host_auth'
+            throw authErr
+          }
         }
         await new Promise((r) => setTimeout(r, 2000))
       }
@@ -193,7 +203,21 @@ export function createHostHandlers({ userId, notify = () => {} }) {
         throw err
       }
 
-      const appName = await ensureSunshineApp(game)
+      let appName
+      try {
+        appName = await ensureSunshineApp(game)
+      } catch (err) {
+        if (String(err?.message || '').includes('401')) {
+          notify({
+            title: 'Streaming needs repair',
+            message: 'The streaming service rejected Launch Deck’s credentials. Toggle streaming OFF and ON in Settings → Streaming to repair it.',
+          })
+          const authErr = new Error('The host’s streaming service needs repair — on the host PC, toggle streaming off and on in Settings → Streaming')
+          authErr.code = 'host_auth'
+          throw authErr
+        }
+        throw err
+      }
       trackStreamedSession(game, userId)
 
       const lanIp = await invoke('get_local_ip').catch(() => '')

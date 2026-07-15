@@ -55,7 +55,9 @@ function buildCloudGamePayload(game, userId, includeUbisoftId = true) {
     progress_percent: game.progress_percent || 0,
     last_played: game.last_played || null,
     updated_at: game.updated_at || new Date().toISOString(),
-    deleted: !!game.deleted,
+    // user_removed rows are hidden from the library even when deleted=0 —
+    // in the cloud both mean "not in this user's library".
+    deleted: !!(game.deleted || game.user_removed),
     cover_url: game.cover_url || null,
     hero_url: game.hero_url || null,
     logo_url: game.logo_url || null,
@@ -324,12 +326,15 @@ export async function syncLocalToCloud(userId) {
     // One-shot backfill: the customization columns were just added (favorite
     // is null on every pre-migration row), so push rows whose local copy has
     // customizations even though updated_at hasn't moved.
+    // Only genuine USER customizations qualify — genres/franchise come from
+    // automatic enrichment on every PC, and letting them trigger the backfill
+    // meant a fresh install force-pushed favorite=false over the real values.
     const needsCustomizationPush =
       gamesTableSupportsCustomization !== false &&
       cloudGame &&
       !cloudGame.deleted &&
       cloudGame.favorite === null &&
-      !!(game.favorite || game.hero_position || game.user_collection || game.franchise || game.genres?.length)
+      !!(game.favorite || game.hero_position || game.user_collection)
 
     if (!cloudGame || localUpdated > cloudUpdated || needsImagePush || needsCustomizationPush) {
       gamesToUpsert.push(buildCloudGamePayload({
@@ -549,6 +554,23 @@ export async function syncCloudToLocal(userId) {
           epic_id: cg.epic_id || localGame.epic_id,
           ubisoft_id: cg.ubisoft_id || localGame.ubisoft_id,
           ...buildLocalCustomizationUpdates(cg),
+        })
+      } else if (
+        cg.deleted &&
+        !localGame.deleted &&
+        !localGame.user_removed &&
+        localGame.status !== 'installed'
+      ) {
+        // Deletion overrides last-write-wins for NON-INSTALLED copies: a PC
+        // holding a stale "not installed" catalog entry bumps updated_at with
+        // every metadata touch, which would forever out-timestamp (and keep
+        // resurrecting) a deliberate removal made on another PC. An installed
+        // copy is clearly still wanted, so it keeps normal LWW protection.
+        await updateGame(localGame.id, {
+          deleted: 1,
+          user_removed: 1,
+          status: 'not_installed',
+          updated_at: cg.updated_at,
         })
       }
     }
