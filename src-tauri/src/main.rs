@@ -7145,6 +7145,7 @@ fn main() {
             fetch_image_base64,
             streaming::get_hostname,
             streaming::get_local_ip,
+            streaming::get_machine_guid,
             streaming::download_file,
             streaming::extract_zip,
             streaming::run_elevated_script,

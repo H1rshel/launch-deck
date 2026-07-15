@@ -5,8 +5,10 @@ import { supabase } from '../supabase'
 // status transition; the target subscribes to INSERTs (Realtime) with a poll
 // fallback so a host that missed the notification still picks work up.
 
-const POLL_INTERVAL_MS = 3000
-const LISTENER_POLL_MS = 20000
+// Realtime delivers in ~1s; the polls are the safety net and must still be
+// tight enough that pairing/stream-prep feels responsive without it.
+const POLL_INTERVAL_MS = 1500
+const LISTENER_POLL_MS = 5000
 const COMMAND_MAX_AGE_MS = 5 * 60 * 1000
 
 /**

@@ -98,6 +98,7 @@ export async function ensurePairedWithHost(userId, host, { onPhase = () => {} } 
 
   // Fire the PIN at the host but don't await — the host retries /api/pin
   // until Moonlight's pair request registers with Sunshine.
+  let hostError = null
   const hostAck = sendCommand(
     userId,
     myDeviceId,
@@ -107,6 +108,7 @@ export async function ensurePairedWithHost(userId, host, { onPhase = () => {} } 
     { timeoutMs: 90_000 },
   ).catch((err) => {
     console.warn('pair_request command failed:', err?.message)
+    hostError = err
     return null
   })
 
@@ -115,10 +117,18 @@ export async function ensurePairedWithHost(userId, host, { onPhase = () => {} } 
   })
 
   if (code !== 0) {
-    await hostAck // surface a more specific host error if there is one
-    const err = new Error('Pairing with the host PC failed')
-    err.code = 'pair_failed'
-    throw err
+    // Moonlight also exits non-zero when it is ALREADY paired with this host
+    // (e.g. after the host's device id changed). `list` succeeds only against
+    // a paired host, so use it to distinguish that from a real failure.
+    const listCode = await runMoonlight(exePath, ['list', host.lanIp], {
+      timeoutMs: 20_000,
+    }).catch(() => -1)
+    if (listCode !== 0) {
+      await hostAck // let the host command settle so hostError is populated
+      const err = hostError || new Error('Pairing with the host PC failed')
+      err.code = err.code || 'pair_failed'
+      throw err
+    }
   }
 
   await markHostPaired(host.deviceId)

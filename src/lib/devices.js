@@ -36,6 +36,20 @@ export function getDeviceId() {
         }
         return id
       }
+
+      // Primary source: the Windows machine GUID — identical on every
+      // launch and every reinstall on the same PC, so device identity can
+      // never fork again (a persisted random UUID demonstrably did: one
+      // laptop registered itself three times).
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const guid = String(await invoke('get_machine_guid') || '').toLowerCase()
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(guid)) {
+          setAppMeta(DEVICE_ID_KEY, guid).catch(() => {})
+          return guid
+        }
+      } catch { /* fall back to the persisted random id */ }
+
       let id = await getAppMeta(DEVICE_ID_KEY)
       if (!id) {
         id = crypto.randomUUID()
@@ -132,6 +146,22 @@ export async function registerDevice(userId) {
     console.warn('registerDevice failed:', error.message)
     return null
   }
+
+  // Self-cleanup: remove ghost registrations of THIS machine under old
+  // device ids (pre-machine-GUID installs, first-launch races). Matching by
+  // hostname is safe in practice — it's this user's own PCs.
+  if (hostname) {
+    supabase
+      .from('user_devices')
+      .delete()
+      .eq('user_id', userId)
+      .eq('hostname', hostname)
+      .neq('device_id', deviceId)
+      .then(({ error: cleanErr }) => {
+        if (cleanErr) console.debug('device ghost cleanup failed:', cleanErr.message)
+      })
+  }
+
   return deviceId
 }
 
@@ -238,7 +268,9 @@ export async function pushInstallMap(userId, { force = false } = {}) {
       ),
     ].sort()
 
-    const hash = installedIds.join('|')
+    // Keyed by device id so an identity migration (random UUID → machine
+    // GUID) re-publishes the map under the new id instead of no-op'ing.
+    const hash = `${deviceId}:${installedIds.join('|')}`
     const lastHash = await getAppMeta(INSTALL_MAP_HASH_KEY)
     if (!force && hash === lastHash) return
 

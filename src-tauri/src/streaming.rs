@@ -132,30 +132,37 @@ pub async fn download_file(
 }
 
 /// Extracts a zip using PowerShell Expand-Archive (no extra crate needed).
+/// MUST be async + spawn_blocking: sync Tauri commands run on the main
+/// thread, and a multi-second extraction froze the whole window
+/// ("Launch Deck is not responding").
 #[tauri::command]
-pub fn extract_zip(zip_path: String, dest_dir: String) -> Result<(), String> {
-    std::fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
-    let output = hidden_command("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &format!(
-                "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-                zip_path.replace('\'', "''"),
-                dest_dir.replace('\'', "''")
-            ),
-        ])
-        .output()
-        .map_err(|e| e.to_string())?;
+pub async fn extract_zip(zip_path: String, dest_dir: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
+        let output = hidden_command("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+                    zip_path.replace('\'', "''"),
+                    dest_dir.replace('\'', "''")
+                ),
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
 
-    if !output.status.success() {
-        return Err(format!(
-            "Extraction failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    Ok(())
+        if !output.status.success() {
+            return Err(format!(
+                "Extraction failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ── Elevated provisioning ────────────────────────────────────────────────────
@@ -223,13 +230,37 @@ pub fn is_sunshine_installed() -> bool {
 }
 
 #[tauri::command]
-pub fn is_sunshine_service_running() -> bool {
-    let output = hidden_command("sc")
-        .args(["query", "SunshineService"])
-        .output();
-    match output {
-        Ok(out) => String::from_utf8_lossy(&out.stdout).contains("RUNNING"),
-        Err(_) => false,
+pub async fn is_sunshine_service_running() -> bool {
+    tauri::async_runtime::spawn_blocking(|| {
+        let output = hidden_command("sc")
+            .args(["query", "SunshineService"])
+            .output();
+        match output {
+            Ok(out) => String::from_utf8_lossy(&out.stdout).contains("RUNNING"),
+            Err(_) => false,
+        }
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// Stable per-Windows-install identifier — survives app reinstalls, DB
+/// resets, and first-launch races (unlike a generated-and-persisted UUID).
+#[tauri::command]
+pub fn get_machine_guid() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
+        use winreg::RegKey;
+        let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey_with_flags("SOFTWARE\\Microsoft\\Cryptography", KEY_READ | KEY_WOW64_64KEY)
+            .map_err(|e| e.to_string())?;
+        let guid: String = key.get_value("MachineGuid").map_err(|e| e.to_string())?;
+        Ok(guid.trim().to_lowercase())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("MachineGuid is Windows-only".into())
     }
 }
 
@@ -332,20 +363,24 @@ pub fn launch_moonlight(
 
 /// Force-terminates a process by image name (used to cancel a stream).
 #[tauri::command]
-pub fn kill_process_by_name(process_name: String) -> Result<(), String> {
+pub async fn kill_process_by_name(process_name: String) -> Result<(), String> {
     if process_name.trim().is_empty() || process_name.contains(&['/', '\\', '"'][..]) {
         return Err("Invalid process name".into());
     }
-    let output = hidden_command("taskkill")
-        .args(["/IM", &process_name, "/F"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        // Process not running is fine for a cancel path
-        let msg = String::from_utf8_lossy(&output.stderr).to_string();
-        if !msg.contains("not found") && !msg.contains("128") {
-            return Err(msg);
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = hidden_command("taskkill")
+            .args(["/IM", &process_name, "/F"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            // Process not running is fine for a cancel path
+            let msg = String::from_utf8_lossy(&output.stderr).to_string();
+            if !msg.contains("not found") && !msg.contains("128") {
+                return Err(msg);
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

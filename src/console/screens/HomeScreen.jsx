@@ -9,10 +9,12 @@ import {
   Calendar,
   Star,
   Ban,
+  MonitorPlay,
 } from 'lucide-react'
 import { getGameImages } from '../../utils/imageHandler'
 import { ImageWithFallback, GameLogo } from '../../components/ui/GameImages'
 import { getInstallTarget } from '../../lib/launcher'
+import { useStreaming } from '../../context/StreamingContext'
 import { useInputLayer } from '../input/InputProvider'
 import { playSfx } from '../audio/sounds'
 import { formatMinutes, relativeTime, getDisplayPlaytimeMinutes } from '../lib/format'
@@ -97,13 +99,23 @@ export default function HomeScreen({
   }, [focused?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { perf, hltb } = useGameInsights(focused)
+  const { getStreamSource } = useStreaming()
 
   const primaryAction = useMemo(() => {
     if (!focused) return null
     if (focused.installed) return { id: 'primary', label: 'Play', icon: Play, kind: 'play' }
+    const streamSource = getStreamSource(focused)
+    if (streamSource) {
+      return {
+        id: 'primary',
+        label: `Stream from ${streamSource.hostname}`,
+        icon: MonitorPlay,
+        kind: 'play',
+      }
+    }
     if (getInstallTarget(focused)) return { id: 'primary', label: 'Install', icon: Download, kind: 'install' }
     return { id: 'primary', label: 'Not Installed', icon: Ban, kind: 'disabled' }
-  }, [focused])
+  }, [focused, getStreamSource])
 
   const actions = useMemo(() => {
     if (!focused || !primaryAction) return []

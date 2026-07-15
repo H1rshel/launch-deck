@@ -8,7 +8,9 @@ import {
   Calendar,
   Gauge,
   Hourglass,
+  MonitorPlay,
 } from 'lucide-react'
+import { useStreaming } from '../../context/StreamingContext'
 import { getGameImages } from '../../utils/imageHandler'
 import { ImageWithFallback, GameLogo } from '../../components/ui/GameImages'
 import { useInputLayer } from '../input/InputProvider'
@@ -71,6 +73,8 @@ export default function LibraryScreen({ games, onFocusGame, onOpenActions, toggl
 
   const focused = list[Math.min(selectedIndex, list.length - 1)] || null
   const { perf, hltb } = useGameInsights(focused)
+  const { getStreamSource } = useStreaming()
+  const focusedStreamSource = focused && !focused.installed ? getStreamSource(focused) : null
 
   // A–Z index — only meaningful for alphabetically sorted filters
   const isAlphabetical = filterId !== 'recent'
@@ -345,11 +349,12 @@ export default function LibraryScreen({ games, onFocusGame, onOpenActions, toggl
                   const isSelected =
                     i === selectedIndex && (zone === 'grid' || zone === 'alpha')
                   const images = getGameImages(game)
+                  const streamable = !game.installed && !!getStreamSource(game)
                   return (
                     <button
                       key={game.id}
                       style={{ '--i': i }}
-                      className={`cos-grid-tile ${isSelected ? 'cos-grid-tile--selected' : ''} ${!game.installed ? 'cos-grid-tile--ghost' : ''}`}
+                      className={`cos-grid-tile ${isSelected ? 'cos-grid-tile--selected' : ''} ${!game.installed && !streamable ? 'cos-grid-tile--ghost' : ''}`}
                       onMouseEnter={() => {
                         setZone('grid')
                         if (i !== selectedIndex) { playSfx('nav'); setSelectedIndex(i) }
@@ -369,6 +374,11 @@ export default function LibraryScreen({ games, onFocusGame, onOpenActions, toggl
                       {game.favorite && (
                         <span className="cos-tile__fav">
                           <Heart size={11} fill="currentColor" />
+                        </span>
+                      )}
+                      {streamable && (
+                        <span className="cos-tile__stream" title="Streamable from another PC">
+                          <MonitorPlay size={11} />
                         </span>
                       )}
                       <span className="cos-tile__ring" aria-hidden="true" />
@@ -441,9 +451,13 @@ export default function LibraryScreen({ games, onFocusGame, onOpenActions, toggl
                   <div className="cos-spot__meta">
                     <span className="cos-spot__row">
                       <span
-                        className={`cos-library__focus-dot ${focused.installed ? 'cos-library__focus-dot--on' : ''}`}
+                        className={`cos-library__focus-dot ${focused.installed ? 'cos-library__focus-dot--on' : ''} ${focusedStreamSource ? 'cos-library__focus-dot--stream' : ''}`}
                       />
-                      {focused.installed ? 'Installed' : 'Not installed'}
+                      {focused.installed
+                        ? 'Installed'
+                        : focusedStreamSource
+                          ? `Stream from ${focusedStreamSource.hostname}`
+                          : 'Not installed'}
                       {focused.favorite && (
                         <Heart size={11} className="cos-spot__fav-icon" fill="currentColor" />
                       )}

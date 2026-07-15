@@ -300,9 +300,14 @@ function ConsoleRoot({ isStartup }) {
   // ── Hints ──
   const hints = useMemo(() => {
     if (screen === 'home') {
+      const primaryLabel = !focusedGame || focusedGame.installed
+        ? 'Play'
+        : getStreamSource(focusedGame)
+          ? 'Stream'
+          : 'Install'
       return [
         { action: 'dirH', label: 'Browse' },
-        { action: 'accept', label: 'Play' },
+        { action: 'accept', label: primaryLabel },
         { action: 'actionX', label: 'Favorite' },
         { action: 'actionY', label: 'Search' },
         { action: 'menu', label: 'Quick Menu' },
@@ -317,7 +322,7 @@ function ConsoleRoot({ isStartup }) {
       { action: 'menu', label: 'Quick Menu' },
       { action: 'back', label: 'Home' },
     ]
-  }, [screen])
+  }, [screen, focusedGame, getStreamSource])
 
   // ── Empty library ──
   if (!games.length) {

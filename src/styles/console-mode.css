@@ -2455,3 +2455,27 @@ body:has(.console-os) {
   border-color: rgba(234, 179, 8, 0.4);
   color: #fde047;
 }
+
+/* ── Streaming (multi-PC) indicators ── */
+.cos-tile__stream {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(4, 6, 11, 0.75);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.cos-library__focus-dot--stream {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.8);
+}
