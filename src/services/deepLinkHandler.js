@@ -53,14 +53,30 @@ export async function recheckDeepLink() {
     const { getCurrent } = await import('@tauri-apps/plugin-deep-link')
     const urls = await getCurrent()
     logAuth('recheck getCurrent', urls?.length ? urls.map(describeUrl).join(' ') : 'empty')
-    if (!urls) return false
-    for (const url of urls) {
-      if (_handledUrls.has(url)) continue
-      _handledUrls.add(url)
-      if (await handleAuthUrl(url)) return true
+    if (urls) {
+      for (const url of urls) {
+        if (_handledUrls.has(url)) continue
+        _handledUrls.add(url)
+        if (await handleAuthUrl(url)) return true
+      }
     }
   } catch (err) {
     logAuth('recheck FAILED', String(err?.message).slice(0, 60))
+  }
+
+  // Plugin bypass: read the activity intent directly over JNI. Covers the
+  // case where the OS delivered the launchdeck:// intent but the deep-link
+  // plugin never surfaced it.
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const raw = await invoke('get_intent_data')
+    logAuth('recheck raw intent', raw ? describeUrl(raw) : 'none')
+    if (raw && raw.startsWith('launchdeck://') && !_handledUrls.has(raw)) {
+      _handledUrls.add(raw)
+      if (await handleAuthUrl(raw)) return true
+    }
+  } catch (err) {
+    logAuth('raw intent FAILED', String(err?.message).slice(0, 60))
   }
   return false
 }

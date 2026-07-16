@@ -166,6 +166,46 @@ mod android {
         })
     }
 
+    /// Reads the current activity intent's data URI directly — a fallback
+    /// for when the deep-link plugin fails to surface a callback that the
+    /// OS definitely delivered to the (singleTask) activity.
+    pub fn current_intent_data() -> Result<Option<String>, String> {
+        with_env(|env, context| {
+            // The ndk-context context is the Activity on Tauri Android;
+            // getIntent only exists on Activity — if this is an Application
+            // context, the call errors and we return None gracefully.
+            let intent = match env.call_method(
+                context,
+                "getIntent",
+                "()Landroid/content/Intent;",
+                &[],
+            ) {
+                Ok(v) => match v.l() {
+                    Ok(obj) => obj,
+                    Err(_) => return Ok(None),
+                },
+                Err(_) => {
+                    // Clear the pending JavaException so later JNI calls work
+                    let _ = env.exception_clear();
+                    return Ok(None);
+                }
+            };
+            if intent.is_null() {
+                return Ok(None);
+            }
+            let data = env
+                .call_method(&intent, "getDataString", "()Ljava/lang/String;", &[])?
+                .l()?;
+            if data.is_null() {
+                return Ok(None);
+            }
+            let data: JString = data.into();
+            let java_str = env.get_string(&data)?;
+            let url = String::from(java_str);
+            Ok(Some(url))
+        })
+    }
+
     /// Opens a URL in the system browser / matching app via ACTION_VIEW.
     pub fn open_url(url: &str) -> Result<(), String> {
         with_env(|env, context| {
@@ -202,6 +242,19 @@ mod android {
 #[cfg(target_os = "android")]
 pub fn android_open_url(url: &str) -> Result<(), String> {
     android::open_url(url)
+}
+
+/// Raw current-intent data URI (deep-link plugin bypass).
+#[tauri::command]
+pub fn get_intent_data() -> Result<Option<String>, String> {
+    #[cfg(target_os = "android")]
+    {
+        android::current_intent_data()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(None)
+    }
 }
 
 #[tauri::command]
