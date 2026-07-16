@@ -15,6 +15,8 @@ export async function initDeepLinkHandler() {
     // Handle deep links that arrive while the app is already running (normal OAuth case)
     await onOpenUrl(async (urls) => {
       for (const url of urls) {
+        if (_handledUrls.has(url)) continue
+        _handledUrls.add(url)
         if (await handleAuthUrl(url)) break
       }
     })
@@ -23,12 +25,40 @@ export async function initDeepLinkHandler() {
     const initialUrls = await getCurrent()
     if (initialUrls) {
       for (const url of initialUrls) {
+        if (_handledUrls.has(url)) continue
+        _handledUrls.add(url)
         if (await handleAuthUrl(url)) break
       }
     }
   } catch (err) {
     console.error('[DeepLink] Handler init failed:', err)
   }
+}
+
+// Tracks handled URLs so the recheck path can't double-exchange a code
+const _handledUrls = new Set()
+
+/**
+ * Re-reads the current intent/deep-link and processes any auth callback.
+ * Android safety net: onOpenUrl doesn't always fire for custom-scheme
+ * intent-filters, but the OS still delivers the intent to the (singleTask)
+ * activity — polling getCurrent when the app regains focus catches it.
+ */
+export async function recheckDeepLink() {
+  if (!isTauri()) return false
+  try {
+    const { getCurrent } = await import('@tauri-apps/plugin-deep-link')
+    const urls = await getCurrent()
+    if (!urls) return false
+    for (const url of urls) {
+      if (_handledUrls.has(url)) continue
+      _handledUrls.add(url)
+      if (await handleAuthUrl(url)) return true
+    }
+  } catch (err) {
+    console.debug('[DeepLink] recheck failed:', err?.message)
+  }
+  return false
 }
 
 async function handleAuthUrl(url) {
