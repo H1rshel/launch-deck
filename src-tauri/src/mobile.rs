@@ -35,7 +35,11 @@ mod android {
             .call_method(context, "getPackageName", "()Ljava/lang/String;", &[])?
             .l()?;
         let pkg: JString = pkg.into();
-        Ok(env.get_string(&pkg)?.into())
+        // Bind the JavaStr before converting: the borrow of `pkg` must not
+        // live inside the return expression (E0597 on the Android target).
+        let java_str = env.get_string(&pkg)?;
+        let name = String::from(java_str);
+        Ok(name)
     }
 
     /// Builds an intent for `package`/`class`, returns None when the activity
