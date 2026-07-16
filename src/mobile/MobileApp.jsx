@@ -102,6 +102,53 @@ export default function MobileApp() {
     return () => window.removeEventListener(AUTH_DEBUG_EVENT, onTrace)
   }, [])
 
+  // Surface silent JS failures in the trace (crashes that swallow taps)
+  useEffect(() => {
+    const onError = (e) =>
+      logAuth('JS ERROR', String(e.reason?.message || e.message || e.reason || e.error).slice(0, 80))
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onError)
+    return () => {
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onError)
+    }
+  }, [])
+
+  // ── Device-link sign-in (browser-free) ──
+  const [linkCode, setLinkCode] = useState('')
+  const [linking, setLinking] = useState(false)
+  const linkWithCode = useCallback(async () => {
+    if (linkCode.length !== 6 || linking) return
+    setLinking(true)
+    try {
+      logAuth('link claim', linkCode)
+      const { data, error } = await supabase.functions.invoke('link-device', {
+        body: { code: linkCode },
+      })
+      if (error || data?.error) {
+        throw new Error(data?.error || error?.message || 'link failed')
+      }
+      logAuth('link token received')
+      const { error: otpErr } = await supabase.auth.verifyOtp({
+        type: 'magiclink',
+        token_hash: data.token_hash,
+      })
+      if (otpErr) throw otpErr
+      logAuth('link SIGNED IN')
+    } catch (err) {
+      const msg = String(err?.message || err)
+      logAuth('link FAILED', msg.slice(0, 60))
+      showToast(
+        msg.includes('code_not_found')
+          ? 'Code not found or expired — generate a fresh one on your PC'
+          : `Linking failed: ${msg}`,
+        'error',
+      )
+    } finally {
+      setLinking(false)
+    }
+  }, [linkCode, linking, showToast])
+
   useEffect(() => {
     if (!signingIn) return undefined
     const poll = setInterval(recheckDeepLink, 2000)
@@ -264,7 +311,43 @@ export default function MobileApp() {
         <img src="/launch-deck-logo-alt.png" alt="" className="m-login__logo" />
         <h1 className="m-login__title">Launch Deck Remote</h1>
         <p className="m-login__sub">Stream your PC games to this tablet</p>
-        <button className="m-google-btn" onClick={signInWithGoogle} disabled={signingIn}>
+
+        <div className="m-link-box">
+          <p className="m-link-box__hint">
+            On your PC: <b>Settings → Streaming → Link a tablet</b>, then type the code here
+          </p>
+          <div className="m-link-box__row">
+            <input
+              className="m-link-code"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              maxLength={6}
+              placeholder="ABC123"
+              value={linkCode}
+              onChange={(e) =>
+                setLinkCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))
+              }
+            />
+            <button
+              className="m-btn m-btn--primary"
+              disabled={linkCode.length !== 6 || linking}
+              onClick={linkWithCode}
+            >
+              {linking ? 'Linking…' : 'Link'}
+            </button>
+          </div>
+        </div>
+
+        <p className="m-login__or">or</p>
+        <button
+          className="m-google-btn"
+          onClick={() => {
+            logAuth('google btn onClick')
+            signInWithGoogle()
+          }}
+          disabled={signingIn}
+        >
           <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
             <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
             <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />

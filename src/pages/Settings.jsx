@@ -55,6 +55,7 @@ import {
   setDeviceStreamingFlags,
 } from "../lib/devices"
 import { provisionSunshineHost } from "../lib/streaming/provision"
+import { supabase } from "../lib/supabase"
 import SteamIconSolid from "../components/icons/SteamIconSolid"
 import GogIcon from "../components/icons/GogIcon"
 import EpicIcon from "../components/icons/EpicIcon"
@@ -1230,6 +1231,33 @@ function StreamingSection() {
     await refreshDevices()
   }
 
+  // ── Tablet link code (browser-free device sign-in) ──
+  const [linkCode, setLinkCode] = useState(null)
+  const linkCodeTimerRef = useRef(null)
+  const generateLinkCode = async () => {
+    if (!user?.id) return
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no ambiguous chars
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const code = Array.from(crypto.getRandomValues(new Uint8Array(6)))
+        .map((b) => alphabet[b % alphabet.length])
+        .join("")
+      const { error } = await supabase
+        .from("device_link_codes")
+        .insert({ code, user_id: user.id })
+      if (!error) {
+        setLinkCode(code)
+        clearTimeout(linkCodeTimerRef.current)
+        linkCodeTimerRef.current = setTimeout(() => setLinkCode(null), 10 * 60 * 1000)
+        return
+      }
+    }
+    addNotification({
+      title: "Could not create a link code",
+      message: "Please try again.",
+      type: "error",
+    })
+  }
+
   return (
     <section
       className="settings__section settings__section--animated settings__section--glass"
@@ -1296,6 +1324,23 @@ function StreamingSection() {
               options={STREAM_BITRATES}
             />
           </div>
+        </div>
+
+        <div className="setting-row">
+          <div className="setting-row__info">
+            <span className="setting-row__label">Link a tablet</span>
+            <span className="setting-row__desc">
+              Sign the Launch Deck Remote app in without a browser: generate a
+              code here, then type it on the tablet's sign-in screen
+            </span>
+          </div>
+          {linkCode ? (
+            <span className="settings__link-code">{linkCode}</span>
+          ) : (
+            <button className="settings__device-link-btn" onClick={generateLinkCode}>
+              Get code
+            </button>
+          )}
         </div>
 
         {devices.length > 0 && (
