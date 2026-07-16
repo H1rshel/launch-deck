@@ -7,7 +7,7 @@ import {
   getAppMeta,
   setAppMeta,
 } from './db'
-import { getCloudGameId } from './cloudSync'
+import { getCloudGameId } from './cloudGameId'
 
 // Syncs the local game_details_cache provider='metadata' payloads (the game
 // description + the user's chosen IGDB/RAWG match) to the user_game_metadata

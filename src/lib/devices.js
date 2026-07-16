@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { getAppMeta, setAppMeta, getAllGames } from './db'
-import { getCloudGameId } from './cloudSync'
+import { getCloudGameId } from './cloudGameId'
 
 const isTauri =
   typeof window !== 'undefined' &&

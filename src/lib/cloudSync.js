@@ -8,6 +8,10 @@ import {
 import { backfillConfirmedGames } from './executableCatalog'
 import { tasteProfileService } from './tasteProfileService'
 import { pushGameMetadata, pullGameMetadata } from './metadataSync'
+import { getCloudGameId } from './cloudGameId'
+
+// Re-exported for existing importers
+export { getCloudGameId }
 
 let gamesTableSupportsUbisoftId = null
 
@@ -200,24 +204,6 @@ function reportSyncFailure(error) {
   } catch { /* non-browser context */ }
 }
 
-/**
- * Generate a consistent game ID for cloud sync.
- * Priority: steam -> gog -> epic -> ubisoft -> local id (fallback)
- */
-export function getCloudGameId(game) {
-  if (game.steam_app_id) return `steam_${game.steam_app_id}`
-  if (game.gog_id) return `gog_${game.gog_id}`
-  if (game.epic_id) return `epic_${game.epic_id}`
-  if (game.ubisoft_id) return `ubisoft_${game.ubisoft_id}`
-  
-  // Fallback to local DB ID
-  if (game.id) return game.id
-  
-  // Last resort
-  return (game.normalized_title || game.title || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-}
 
 /**
  * Perform initial full-library sync.
