@@ -6,6 +6,13 @@ plugins {
     id("rust")
 }
 
+// OneDrive constantly locks build intermediates mid-build (AccessDenied on
+// merged_res/native_libs). When the repo lives under OneDrive, point
+// LD_ANDROID_BUILD_DIR at a local path (e.g. C:\Dev\ld-build\app).
+System.getenv("LD_ANDROID_BUILD_DIR")?.let {
+    layout.buildDirectory.set(File(it))
+}
+
 val tauriProperties = Properties().apply {
     val propFile = file("tauri.properties")
     if (propFile.exists()) {
@@ -33,6 +40,7 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        missingDimensionStrategy("root", "nonRoot")
     }
     signingConfigs {
         if (keystoreProperties.containsKey("storeFile")) {
@@ -81,6 +89,8 @@ rust {
 }
 
 dependencies {
+    // Embedded Moonlight streaming engine (GPL-3; see moonlight/LICENSE.txt)
+    implementation(project(":moonlight"))
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")

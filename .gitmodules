@@ -1,3 +1,4 @@
 [submodule "src-tauri/gen/android/moonlight"]
 	path = src-tauri/gen/android/moonlight
-	url = https://github.com/moonlight-stream/moonlight-android.git
+	url = https://github.com/H1rshel/moonlight-android.git
+	branch = launchdeck-embed

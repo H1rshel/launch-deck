@@ -7187,6 +7187,7 @@ pub fn run() {
             streaming::launch_moonlight,
             streaming::kill_process_by_name,
             mobile::is_moonlight_installed,
+            mobile::has_embedded_engine,
             mobile::open_moonlight_app,
             mobile::launch_moonlight_stream
         ])

@@ -1,3 +1,9 @@
 include ':app'
+include ':moonlight'
+// GNU make (ndk-build) cannot handle spaces in paths, so when the repo lives
+// under a spaced path (e.g. "Visual Studio Projects"), point LD_MOONLIGHT_DIR
+// at a space-free mirror of the moonlight submodule (robocopy /MIR, without .git).
+def moonlightOverride = System.getenv('LD_MOONLIGHT_DIR')
+project(':moonlight').projectDir = moonlightOverride ? new File(moonlightOverride) : new File(rootDir, 'moonlight/app')
 
 apply from: 'tauri.settings.gradle'
