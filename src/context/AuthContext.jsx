@@ -158,13 +158,20 @@ export function AuthProvider({ children }) {
   }, [user, ensureProfile])
 
   const signInWithGoogle = useCallback(async () => {
+    const { logAuth } = await import('../lib/authDebug')
     try {
+      logAuth('signin tapped')
       setSigningIn(true)
       setError(null)
 
       const openExternal = shouldOpenExternalBrowser()
+      logAuth('mode', openExternal ? 'external browser' : 'in-webview')
 
-      const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+      // supabase-js auth can hang forever on some WebViews (internal
+      // navigator.locks acquisition) — race it so the failure is visible
+      // instead of a silent dead button.
+      logAuth('calling signInWithOAuth')
+      const oauthPromise = supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: getAuthRedirectUrl(),
@@ -173,6 +180,18 @@ export function AuthProvider({ children }) {
           skipBrowserRedirect: openExternal,
         },
       })
+      const result = await Promise.race([
+        oauthPromise,
+        new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), 12_000)),
+      ])
+      if (result.__timeout) {
+        logAuth('signInWithOAuth HUNG', 'no response in 12s')
+        setSigningIn(false)
+        setError('Sign-in could not start (the auth client stalled). Please try again.')
+        return
+      }
+      logAuth('signInWithOAuth returned', result.error ? `error: ${String(result.error?.message).slice(0, 60)}` : 'ok')
+      const { data, error: oauthError } = result
 
       if (oauthError) {
         setSigningIn(false)

@@ -10,5 +10,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     detectSessionInUrl: true,
     flowType: 'pkce',
+    // Pass-through lock: supabase-js's default navigator.locks-based lock
+    // can hang forever on some Android WebViews, freezing every auth call
+    // (observed as signInWithOAuth never resolving on the tablet). The app
+    // is a single WebView context — there are no multi-tab races the lock
+    // would protect against.
+    lock: async (_name, _acquireTimeout, fn) => await fn(),
   },
 })
