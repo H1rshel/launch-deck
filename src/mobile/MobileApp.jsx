@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { getDeviceId, getUserDevices, isDeviceOnline, getStreamSourceMap } from '../lib/devices'
 import { sendCommand } from '../lib/streaming/commandBus'
 import { initDeepLinkHandler, recheckDeepLink } from '../services/deepLinkHandler'
+import { logAuth, getAuthTrace, AUTH_DEBUG_EVENT } from '../lib/authDebug'
 import './mobile.css'
 
 // Launch Deck Remote — the slim streaming-only tablet experience.
@@ -86,10 +87,19 @@ export default function MobileApp() {
   // is in flight so the callback can't be missed.
   useEffect(() => {
     const onVisible = () => {
+      logAuth('visibility', document.visibilityState)
       if (document.visibilityState === 'visible') recheckDeepLink()
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+
+  // Live auth trace for the login screen (diagnosable from a screenshot)
+  const [trace, setTrace] = useState(() => getAuthTrace())
+  useEffect(() => {
+    const onTrace = () => setTrace(getAuthTrace())
+    window.addEventListener(AUTH_DEBUG_EVENT, onTrace)
+    return () => window.removeEventListener(AUTH_DEBUG_EVENT, onTrace)
   }, [])
 
   useEffect(() => {
@@ -269,6 +279,13 @@ export default function MobileApp() {
           </button>
         )}
         {authError && <p className="m-login__error">{authError}</p>}
+        {trace.length > 0 && (
+          <div className="m-trace">
+            {trace.slice(-8).map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+        )}
       </div>
     )
   }

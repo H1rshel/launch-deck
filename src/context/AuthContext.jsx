@@ -198,11 +198,25 @@ export function AuthProvider({ children }) {
         }
 
         try {
-          const { invoke } = await import('@tauri-apps/api/core')
-          await invoke('open_url', { url: data.url })
+          // The opener plugin is the supported cross-platform path (incl.
+          // Android); the custom open_url command stays as the fallback.
+          const { logAuth, describeUrl } = await import('../lib/authDebug')
+          logAuth('oauth url ready', describeUrl(data.url))
+          try {
+            const { openUrl } = await import('@tauri-apps/plugin-opener')
+            await openUrl(data.url)
+            logAuth('browser opened', 'opener plugin')
+          } catch (pluginErr) {
+            logAuth('opener plugin failed', String(pluginErr).slice(0, 80))
+            const { invoke } = await import('@tauri-apps/api/core')
+            await invoke('open_url', { url: data.url })
+            logAuth('browser opened', 'open_url fallback')
+          }
         } catch (openerErr) {
           // opener failed — show the real error, not "Network error"
           setSigningIn(false)
+          const { logAuth } = await import('../lib/authDebug')
+          logAuth('browser open FAILED', String(openerErr).slice(0, 80))
           if (import.meta.env.DEV) {
             console.error('[Auth] open_url invoke failed:', openerErr)
           }

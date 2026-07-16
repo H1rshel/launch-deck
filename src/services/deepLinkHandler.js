@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { _authBridge } from '../context/AuthContext'
+import { logAuth, describeUrl } from '../lib/authDebug'
 
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
@@ -14,12 +15,14 @@ export async function initDeepLinkHandler() {
 
     // Handle deep links that arrive while the app is already running (normal OAuth case)
     await onOpenUrl(async (urls) => {
+      logAuth('deeplink event', urls.map(describeUrl).join(' '))
       for (const url of urls) {
         if (_handledUrls.has(url)) continue
         _handledUrls.add(url)
         if (await handleAuthUrl(url)) break
       }
     })
+    logAuth('deeplink handler ready')
 
     // Handle deep link if the app was cold-launched via the scheme
     const initialUrls = await getCurrent()
@@ -49,6 +52,7 @@ export async function recheckDeepLink() {
   try {
     const { getCurrent } = await import('@tauri-apps/plugin-deep-link')
     const urls = await getCurrent()
+    logAuth('recheck getCurrent', urls?.length ? urls.map(describeUrl).join(' ') : 'empty')
     if (!urls) return false
     for (const url of urls) {
       if (_handledUrls.has(url)) continue
@@ -56,7 +60,7 @@ export async function recheckDeepLink() {
       if (await handleAuthUrl(url)) return true
     }
   } catch (err) {
-    console.debug('[DeepLink] recheck failed:', err?.message)
+    logAuth('recheck FAILED', String(err?.message).slice(0, 60))
   }
   return false
 }
@@ -95,7 +99,9 @@ async function handleAuthUrl(url) {
     if (code) {
       // The code verifier was stored in the WebView localStorage when
       // signInWithOAuth() was called. exchangeCodeForSession reads it automatically.
+      logAuth('exchanging code')
       const { error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code)
+      logAuth('exchange result', exchangeErr ? exchangeErr.message.slice(0, 60) : 'SIGNED IN')
       if (exchangeErr) {
         console.error('[DeepLink] exchangeCodeForSession failed:', exchangeErr.message)
         _authBridge.setSigningIn?.(false)
