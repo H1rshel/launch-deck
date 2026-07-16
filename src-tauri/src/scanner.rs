@@ -7,7 +7,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
 use walkdir::WalkDir;
+#[cfg(windows)]
 use winreg::enums::*;
+#[cfg(windows)]
 use winreg::RegKey;
 
 use crate::{fetch_game_data, GameData};
@@ -307,6 +309,7 @@ fn extract_metadata(exe_path: &Path) -> Option<ExecutableMetadata> {
 // STEAM DETECTION
 // ---------------------------------------------
 
+#[cfg(windows)]
 fn get_steam_path() -> Option<PathBuf> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let steam_key = hkcu.open_subkey("Software\\Valve\\Steam").ok()?;
@@ -1216,6 +1219,7 @@ pub fn resolve_ubisoft_space_id(app_id: &str) -> Option<String> {
 }
 
 // ── GOG Galaxy ────────────────────────────────────────────────────────────────
+#[cfg(windows)]
 fn scan_gog_library() -> Vec<LauncherGame> {
     let mut games: Vec<LauncherGame> = Vec::new();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
@@ -1319,6 +1323,7 @@ fn scan_epic_library() -> Vec<LauncherGame> {
 }
 
 // ── Ubisoft Connect ───────────────────────────────────────────────────────────
+#[cfg(windows)]
 fn scan_ubisoft_library() -> Vec<LauncherGame> {
     let mut games: Vec<LauncherGame> = Vec::new();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
@@ -1370,6 +1375,7 @@ fn scan_ubisoft_library() -> Vec<LauncherGame> {
 }
 
 // ── EA App ────────────────────────────────────────────────────────────────────
+#[cfg(windows)]
 fn scan_ea_library() -> Vec<LauncherGame> {
     let mut games: Vec<LauncherGame> = Vec::new();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
@@ -1434,6 +1440,7 @@ fn scan_ea_library() -> Vec<LauncherGame> {
 }
 
 // ── Battle.net ────────────────────────────────────────────────────────────────
+#[cfg(windows)]
 fn scan_battlenet_library() -> Vec<LauncherGame> {
     let mut games = Vec::new();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
@@ -1651,4 +1658,33 @@ pub async fn list_game_exes(folder: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub async fn path_exists(path: String) -> bool {
     Path::new(&path).exists()
+}
+
+// ── Non-Windows stubs ─────────────────────────────────────────────────────────
+// The launcher-library scanners read the Windows registry; on mobile the app
+// is a streaming-only client and never scans local installs.
+
+#[cfg(not(windows))]
+fn get_steam_path() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(windows))]
+fn scan_gog_library() -> Vec<LauncherGame> {
+    Vec::new()
+}
+
+#[cfg(not(windows))]
+fn scan_ubisoft_library() -> Vec<LauncherGame> {
+    Vec::new()
+}
+
+#[cfg(not(windows))]
+fn scan_ea_library() -> Vec<LauncherGame> {
+    Vec::new()
+}
+
+#[cfg(not(windows))]
+fn scan_battlenet_library() -> Vec<LauncherGame> {
+    Vec::new()
 }

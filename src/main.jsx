@@ -40,22 +40,38 @@ setTimeout(() => {
   }
 }, 15000)
 
+// Android tablets get the slim streaming-only experience: no scanners,
+// no local library, no desktop chrome — just the cloud library and the
+// Moonlight handoff. Desktop keeps the full app.
+const IS_ANDROID = /android/i.test(navigator.userAgent)
+const MobileApp = IS_ANDROID ? React.lazy(() => import('./mobile/MobileApp')) : null
+
 root.render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <BrowserRouter>
-        <SettingsProvider>
+      {IS_ANDROID ? (
+        <BrowserRouter>
           <AuthProvider>
-            <NotificationProvider>
-              <GameProvider>
-                <StreamingProvider>
-                  <App />
-                </StreamingProvider>
-              </GameProvider>
-            </NotificationProvider>
+            <React.Suspense fallback={null}>
+              <MobileApp />
+            </React.Suspense>
           </AuthProvider>
-        </SettingsProvider>
-      </BrowserRouter>
+        </BrowserRouter>
+      ) : (
+        <BrowserRouter>
+          <SettingsProvider>
+            <AuthProvider>
+              <NotificationProvider>
+                <GameProvider>
+                  <StreamingProvider>
+                    <App />
+                  </StreamingProvider>
+                </GameProvider>
+              </NotificationProvider>
+            </AuthProvider>
+          </SettingsProvider>
+        </BrowserRouter>
+      )}
     </AppErrorBoundary>
   </React.StrictMode>
 )

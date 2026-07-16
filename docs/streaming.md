@@ -74,6 +74,32 @@ GameActionSheet. Overlay: `src/components/games/StreamingOverlay.jsx`.
 - Cloud sync degrades gracefully if the migration is missing (column-detection
   fallbacks in `cloudSync.js`).
 
+## Android tablet app ("Launch Deck Remote")
+
+Added 2026-07-16. The same repo builds a slim streaming-only Android app via
+Tauri's mobile target (`npm run tauri android build -- --apk --target aarch64`,
+requires the SDK/NDK env vars; signing config reads
+`%USERPROFILE%\.android-keys\keystore.properties`).
+
+- `src/mobile/MobileApp.jsx` — the entire tablet UI (login → streamable
+  library → Moonlight handoff). `main.jsx` branches on the Android user agent.
+- Pure Supabase client: cloud `games` + `device_game_installs` +
+  `user_devices`, and the same `device_commands` bus. No SQLite library, no
+  scanners, no host provisioning.
+- The actual stream plays in the official **Moonlight Android** app:
+  `src-tauri/src/mobile.rs` drives it over JNI (`ShortcutTrampoline` intent
+  with `Name`/`AppName` extras = one-tap stream; PackageManager check;
+  Play-Store link on first use). Manifest has a `<queries>` entry for
+  `com.limelight` and a `launchdeck://` intent filter for OAuth callbacks.
+- One-time pairing: user types the 4-digit PIN Moonlight displays into the
+  tablet app → `pair_request` over the command bus → host auto-approves.
+- Sunshine app entries are named after the **game title** (mobile Moonlight
+  shows them raw); legacy `LD: <id>` entries migrate in place.
+- Desktop Rust changes for the port: crate split into lib.rs + thin main.rs
+  (`mobile_entry_point`), Windows-only deps/target-gated code
+  (winreg/single-instance/updater/tray), reqwest on rustls, capabilities
+  split (`desktop.json` holds `updater:default`).
+
 ## Known limitations / follow-ups
 
 - **LAN only** (v1). WAN needs UPnP/Tailscale — future phase.

@@ -1,0 +1,9 @@
+{
+  "identifier": "desktop",
+  "description": "Desktop-only capabilities (plugins that do not exist on mobile)",
+  "platforms": ["windows", "macOS", "linux"],
+  "windows": ["main"],
+  "permissions": [
+    "updater:default"
+  ]
+}

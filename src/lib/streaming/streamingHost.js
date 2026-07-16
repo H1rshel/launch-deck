@@ -31,14 +31,22 @@ async function findLocalGameByCloudId(cloudGameId) {
  * Makes sure Sunshine has an app entry for the game and returns its name.
  * The entry's cmd is the game exe directly: Sunshine ties the stream lifetime
  * to that process (client quits → game terminated; game exits → stream ends).
+ *
+ * The entry is named after the GAME TITLE — mobile Moonlight clients show
+ * these names directly, so "Cyberpunk 2077" beats "LD: steam_1091500".
+ * Legacy "LD: <id>" entries are migrated in place.
  */
 export async function ensureSunshineApp(game) {
-  const appName = APP_NAME_PREFIX + getCloudGameId(game)
+  const appName =
+    (game.normalized_title || game.title || '').trim() ||
+    APP_NAME_PREFIX + getCloudGameId(game)
+  const legacyName = APP_NAME_PREFIX + getCloudGameId(game)
 
   const current = await sunshineApi('GET', '/api/apps')
   const apps = current?.apps || []
-  const existing = apps.find((a) => a?.name === appName)
-  if (existing && existing.cmd === game.install_path) return appName
+  const existing =
+    apps.find((a) => a?.name === appName) || apps.find((a) => a?.name === legacyName)
+  if (existing && existing.name === appName && existing.cmd === game.install_path) return appName
 
   const dir = game.install_path.replace(/\\[^\\]+$/, '')
   await sunshineApi('POST', '/api/apps', {
