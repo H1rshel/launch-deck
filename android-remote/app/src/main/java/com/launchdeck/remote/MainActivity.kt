@@ -69,8 +69,16 @@ class MainActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = false
         }
 
+        // Vite rewrites imported-asset URLs relative to base, but literal
+        // public paths like "/launch-deck-logo.png" stay absolute — serve
+        // those from assets/www via a root handler too.
+        val assetsHandler = WebViewAssetLoader.AssetsPathHandler(this)
         val assetLoader = WebViewAssetLoader.Builder()
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/assets/", assetsHandler)
+            .addPathHandler("/", object : WebViewAssetLoader.PathHandler {
+                override fun handle(path: String): WebResourceResponse? =
+                    assetsHandler.handle("www/$path")
+            })
             .build()
 
         webView.webViewClient = object : WebViewClient() {
