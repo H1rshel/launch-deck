@@ -37,11 +37,12 @@ function markPaired(deviceId) {
   }
 }
 
-function GameTile({ game, source, onPlay }) {
+function GameTile({ game, source, onPlay, focused, index }) {
   const cover = game.cover_url || game.hero_url
   return (
     <button
-      className={`m-tile ${source ? '' : 'm-tile--offline'}`}
+      data-tile-index={index}
+      className={`m-tile ${source ? '' : 'm-tile--offline'} ${focused ? 'm-tile--focused' : ''}`}
       onClick={() => onPlay(game, source)}
     >
       {cover ? (
@@ -71,7 +72,19 @@ export default function MobileApp() {
   const [devices, setDevices] = useState([])
   const [libLoading, setLibLoading] = useState(true)
   const [toast, setToast] = useState(null)
-  const [sheet, setSheet] = useState(null) // {type:'install'|'pair'|'starting', game, source}
+  const [sheet, setSheetRaw] = useState(null) // {type:'install'|'pair'|'starting', game, source}
+  // Ghost-click guard: a tile tap can synthesize a second click on the sheet
+  // button that renders under the same finger position — arm buttons late.
+  const [sheetArmed, setSheetArmed] = useState(false)
+  const setSheet = useCallback((next) => {
+    setSheetRaw(next)
+    setSheetArmed(false)
+  }, [])
+  useEffect(() => {
+    if (!sheet) return undefined
+    const t = setTimeout(() => setSheetArmed(true), 450)
+    return () => clearTimeout(t)
+  }, [sheet])
   const [pin, setPin] = useState('')
   const [pairing, setPairing] = useState(false)
   const toastTimer = useRef(null)
@@ -218,6 +231,66 @@ export default function MobileApp() {
     })
   }, [games, sourceMap])
 
+  // ── Controller navigation: D-pad/left stick moves focus, A plays, B closes ──
+  const [padFocus, setPadFocus] = useState(-1)
+  const gridRef = useRef(null)
+  const handlePlayRef = useRef(null)
+  const navRefs = useRef({})
+  useEffect(() => {
+    navRefs.current = { orderedGames, sourceMap, sheet, padFocus }
+  })
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+    let raf
+    const prev = {}
+    const cols = () => {
+      const el = gridRef.current
+      return el ? Math.max(1, Math.floor((el.clientWidth + 16) / 166)) : 4
+    }
+    const loop = () => {
+      const gp = [...(navigator.getGamepads?.() || [])].find(Boolean)
+      if (gp) {
+        const ax = gp.axes?.[0] ?? 0
+        const ay = gp.axes?.[1] ?? 0
+        const state = {
+          left: gp.buttons?.[14]?.pressed || ax < -0.6,
+          right: gp.buttons?.[15]?.pressed || ax > 0.6,
+          up: gp.buttons?.[12]?.pressed || ay < -0.6,
+          down: gp.buttons?.[13]?.pressed || ay > 0.6,
+          a: gp.buttons?.[0]?.pressed,
+          b: gp.buttons?.[1]?.pressed,
+        }
+        const { orderedGames: games2, sourceMap: map2, sheet: sheet2, padFocus: cur } = navRefs.current
+        const n = games2.length
+        const move = (delta) => {
+          if (!n) return
+          const next = cur < 0 ? 0 : Math.min(n - 1, Math.max(0, cur + delta))
+          setPadFocus(next)
+          document
+            .querySelector(`[data-tile-index="${next}"]`)
+            ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        }
+        if (!sheet2) {
+          if (state.left && !prev.left) move(-1)
+          if (state.right && !prev.right) move(1)
+          if (state.up && !prev.up) move(-cols())
+          if (state.down && !prev.down) move(cols())
+          if (state.a && !prev.a && cur >= 0 && games2[cur]) {
+            const game = games2[cur]
+            handlePlayRef.current?.(game, map2.get(game.game_id)?.[0] || null)
+          }
+        } else if (state.b && !prev.b && sheet2.type !== 'starting') {
+          setSheet(null)
+        }
+        Object.assign(prev, state)
+      }
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [user?.id, setSheet])
+
   const startStream = useCallback(
     async (game, source) => {
       setSheet({ type: 'starting', game, source })
@@ -272,6 +345,11 @@ export default function MobileApp() {
     },
     [onlineHosts.length, showToast, startStream],
   )
+
+  // Gamepad loop reads handlePlay through a ref (stable across renders)
+  useEffect(() => {
+    handlePlayRef.current = handlePlay
+  }, [handlePlay])
 
   const submitPair = useCallback(async () => {
     if (!sheet?.source || pin.length !== 4 || pairing) return
@@ -399,11 +477,13 @@ export default function MobileApp() {
       {libLoading ? (
         <div className="m-center m-grow"><div className="m-spinner" /></div>
       ) : (
-        <main className="m-grid">
-          {orderedGames.map((game) => (
+        <main className="m-grid" ref={gridRef}>
+          {orderedGames.map((game, i) => (
             <GameTile
               key={game.game_id}
               game={game}
+              index={i}
+              focused={i === padFocus}
               source={sourceMap.get(game.game_id)?.[0] || null}
               onPlay={handlePlay}
             />
@@ -421,6 +501,7 @@ export default function MobileApp() {
             <p>Streaming uses the free Moonlight app to play the video from your PC.</p>
             <button
               className="m-btn m-btn--primary"
+              disabled={!sheetArmed}
               onClick={() => invoke('open_url', { url: MOONLIGHT_MARKET_URL }).catch(() => {})}
             >
               Get Moonlight (free)
@@ -441,6 +522,7 @@ export default function MobileApp() {
             </ol>
             <button
               className="m-btn"
+              disabled={!sheetArmed}
               onClick={() => invoke('open_moonlight_app').catch(() => {})}
             >
               Open Moonlight
