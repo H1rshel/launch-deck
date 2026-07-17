@@ -10,7 +10,6 @@ import android.webkit.JavascriptInterface
  */
 class NativeBridge(
     private val activity: MainActivity,
-    private val orchestrator: StreamOrchestrator,
 ) {
 
     /** Marker the web UI probes to detect the v2 native shell. */
@@ -26,13 +25,17 @@ class NativeBridge(
      */
     @JavascriptInterface
     fun startStream(hostIp: String, appName: String) {
-        orchestrator.startStream(hostIp.trim(), appName.trim())
+        // Called from the WebView's JS thread; the orchestrator (and its
+        // service binding) must be created on the UI thread.
+        activity.runOnUiThread {
+            activity.orchestrator().startStream(hostIp.trim(), appName.trim())
+        }
     }
 
     /** Cancels an in-flight startStream (best effort). */
     @JavascriptInterface
     fun cancelStream() {
-        orchestrator.cancel()
+        activity.runOnUiThread { activity.orchestrator().cancel() }
     }
 
     @JavascriptInterface
