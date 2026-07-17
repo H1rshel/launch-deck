@@ -25,9 +25,37 @@ export function logAuth(step, detail = '') {
   try {
     localStorage.setItem(PERSIST_KEY, JSON.stringify(events))
   } catch { /* storage full/unavailable */ }
+  // WebView flushes localStorage lazily — a crash destroys the newest lines.
+  // The Rust append syncs to disk per line and survives process death.
+  if ('__TAURI_INTERNALS__' in window) {
+    import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('append_trace_line', { line: entry }))
+      .catch(() => {})
+  }
   try {
     window.dispatchEvent(new CustomEvent(AUTH_DEBUG_EVENT))
   } catch { /* non-browser */ }
+}
+
+/**
+ * Startup: replace the (lossy) localStorage view with the durable Rust file
+ * log, and append Android's own record of why the app last died.
+ */
+export async function loadDurableTrace() {
+  if (!('__TAURI_INTERNALS__' in window)) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const fileLines = await invoke('read_trace_log').catch(() => [])
+    if (Array.isArray(fileLines) && fileLines.length) {
+      events.length = 0
+      events.push(...fileLines.slice(-30), '────── app restarted ──────')
+    }
+    const reasons = await invoke('get_last_exit_reasons').catch(() => [])
+    for (const r of reasons || []) {
+      events.push(`prev exit: ${String(r).slice(0, 160)}`)
+    }
+    window.dispatchEvent(new CustomEvent(AUTH_DEBUG_EVENT))
+  } catch { /* diagnostics must never break the app */ }
 }
 
 export function getAuthTrace() {

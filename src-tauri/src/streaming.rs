@@ -30,6 +30,38 @@ fn streaming_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+// ── Crash-proof trace log ────────────────────────────────────────────────────
+// Android WebView flushes localStorage lazily, so a process crash destroys
+// the most recent (= most important) trace lines. Rust file appends with an
+// explicit sync survive anything short of power loss.
+
+#[tauri::command]
+pub fn append_trace_line(app: tauri::AppHandle, line: String) -> Result<(), String> {
+    use std::io::Write;
+    let path = streaming_dir(&app)?.join("trace.log");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    writeln!(file, "{}", line.chars().take(200).collect::<String>()).map_err(|e| e.to_string())?;
+    let _ = file.sync_data();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_trace_log(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let path = streaming_dir(&app)?.join("trace.log");
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let lines: Vec<String> = content.lines().map(String::from).collect();
+    let keep: Vec<String> = lines.iter().rev().take(60).rev().cloned().collect();
+    // Compact the file so it can't grow unboundedly
+    if lines.len() > 200 {
+        let _ = std::fs::write(&path, keep.join("\n") + "\n");
+    }
+    Ok(keep)
+}
+
 // ── Identity / network ───────────────────────────────────────────────────────
 
 #[tauri::command]

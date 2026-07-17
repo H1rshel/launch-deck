@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { getDeviceId, getUserDevices, isDeviceOnline, getStreamSourceMap } from '../lib/devices'
 import { sendCommand } from '../lib/streaming/commandBus'
 import { initDeepLinkHandler, recheckDeepLink } from '../services/deepLinkHandler'
-import { logAuth, getAuthTrace, AUTH_DEBUG_EVENT } from '../lib/authDebug'
+import { logAuth, getAuthTrace, AUTH_DEBUG_EVENT, loadDurableTrace } from '../lib/authDebug'
 import './mobile.css'
 
 // Launch Deck Remote — the slim streaming-only tablet experience.
@@ -101,6 +101,8 @@ export default function MobileApp() {
   // OAuth deep-link callback (launchdeck://auth/callback)
   useEffect(() => {
     initDeepLinkHandler()
+    // Durable trace + Android's own exit reason for the previous death
+    loadDurableTrace()
   }, [])
 
   // Android safety net: the deep-link event doesn't reliably fire for

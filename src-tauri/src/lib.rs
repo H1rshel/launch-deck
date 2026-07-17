@@ -7188,6 +7188,9 @@ pub fn run() {
             streaming::kill_process_by_name,
             mobile::is_moonlight_installed,
             mobile::get_intent_data,
+            mobile::get_last_exit_reasons,
+            streaming::append_trace_line,
+            streaming::read_trace_log,
             mobile::has_embedded_engine,
             mobile::open_moonlight_app,
             mobile::launch_moonlight_stream

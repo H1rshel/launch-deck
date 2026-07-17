@@ -212,6 +212,95 @@ mod android {
         })
     }
 
+    /// Why did this app's processes last die? (API 30+) Returns human-readable
+    /// entries: "<process> reason=<code:name> <description> @<time>".
+    /// The definitive crash evidence when adb isn't available.
+    pub fn last_exit_reasons() -> Result<Vec<String>, String> {
+        fn reason_name(code: i32) -> &'static str {
+            match code {
+                1 => "EXIT_SELF",
+                2 => "SIGNALED",
+                3 => "LOW_MEMORY",
+                4 => "JAVA_CRASH",
+                5 => "NATIVE_CRASH",
+                6 => "ANR",
+                7 => "INITIALIZATION_FAILURE",
+                8 => "PERMISSION_CHANGE",
+                9 => "EXCESSIVE_RESOURCE_USAGE",
+                10 => "USER_REQUESTED",
+                11 => "USER_STOPPED",
+                12 => "DEPENDENCY_DIED",
+                13 => "OTHER",
+                14 => "FREEZER",
+                _ => "UNKNOWN",
+            }
+        }
+        with_env(|env, context| {
+            let svc = env.new_string("activity")?;
+            let am = env
+                .call_method(
+                    context,
+                    "getSystemService",
+                    "(Ljava/lang/String;)Ljava/lang/Object;",
+                    &[(&svc).into()],
+                )?
+                .l()?;
+            let pkg_obj = env
+                .call_method(context, "getPackageName", "()Ljava/lang/String;", &[])?
+                .l()?;
+            let list = env
+                .call_method(
+                    am,
+                    "getHistoricalProcessExitReasons",
+                    "(Ljava/lang/String;II)Ljava/util/List;",
+                    &[(&pkg_obj).into(), JValue::Int(0), JValue::Int(4)],
+                )?
+                .l()?;
+            let size = env.call_method(&list, "size", "()I", &[])?.i()?;
+            let mut out = Vec::new();
+            for i in 0..size.min(4) {
+                let info = env
+                    .call_method(&list, "get", "(I)Ljava/lang/Object;", &[JValue::Int(i)])?
+                    .l()?;
+                let reason = env.call_method(&info, "getReason", "()I", &[])?.i()?;
+                let ts = env.call_method(&info, "getTimestamp", "()J", &[])?.j()?;
+                let proc_name = {
+                    let o = env
+                        .call_method(&info, "getProcessName", "()Ljava/lang/String;", &[])?
+                        .l()?;
+                    if o.is_null() {
+                        String::new()
+                    } else {
+                        let js: JString = o.into();
+                        let s = env.get_string(&js)?;
+                        String::from(s)
+                    }
+                };
+                let desc = {
+                    let o = env
+                        .call_method(&info, "getDescription", "()Ljava/lang/String;", &[])?
+                        .l()?;
+                    if o.is_null() {
+                        String::new()
+                    } else {
+                        let js: JString = o.into();
+                        let s = env.get_string(&js)?;
+                        String::from(s)
+                    }
+                };
+                out.push(format!(
+                    "{} reason={}:{} {} @{}",
+                    proc_name,
+                    reason,
+                    reason_name(reason),
+                    desc,
+                    ts
+                ));
+            }
+            Ok(out)
+        })
+    }
+
     /// Opens a URL in the system browser / matching app via ACTION_VIEW.
     pub fn open_url(url: &str) -> Result<(), String> {
         with_env(|env, context| {
@@ -248,6 +337,19 @@ mod android {
 #[cfg(target_os = "android")]
 pub fn android_open_url(url: &str) -> Result<(), String> {
     android::open_url(url)
+}
+
+/// Historical process-exit reasons (why did the app last die). Android only.
+#[tauri::command]
+pub fn get_last_exit_reasons() -> Result<Vec<String>, String> {
+    #[cfg(target_os = "android")]
+    {
+        android::last_exit_reasons()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(Vec::new())
+    }
 }
 
 /// Raw current-intent data URI (deep-link plugin bypass).
