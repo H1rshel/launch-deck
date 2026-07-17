@@ -76,6 +76,14 @@ export default function MobileApp() {
   const [pairing, setPairing] = useState(false)
   const toastTimer = useRef(null)
 
+  // Declared before anything that lists it as a dependency — a useCallback
+  // deps array referencing a later `const` is a TDZ crash on every render.
+  const showToast = useCallback((message, kind = 'info') => {
+    clearTimeout(toastTimer.current)
+    setToast({ message, kind })
+    toastTimer.current = setTimeout(() => setToast(null), 4200)
+  }, [])
+
   // OAuth deep-link callback (launchdeck://auth/callback)
   useEffect(() => {
     initDeepLinkHandler()
@@ -160,11 +168,6 @@ export default function MobileApp() {
     }
   }, [signingIn])
 
-  const showToast = useCallback((message, kind = 'info') => {
-    clearTimeout(toastTimer.current)
-    setToast({ message, kind })
-    toastTimer.current = setTimeout(() => setToast(null), 4200)
-  }, [])
 
   const refresh = useCallback(async () => {
     if (!user?.id) return
