@@ -12,9 +12,25 @@ class NativeBridge(
     private val activity: MainActivity,
 ) {
 
+    private val updater by lazy { UpdateInstaller(activity) }
+
     /** Marker the web UI probes to detect the v2 native shell. */
     @JavascriptInterface
     fun shellVersion(): String = "2"
+
+    /** The installed APK version (e.g. "2.1.2") for update checks. */
+    @JavascriptInterface
+    fun appVersion(): String = BuildConfig.VERSION_NAME
+
+    /**
+     * Downloads the APK at `url` and opens the system installer.
+     * Progress arrives as `update-progress` events; `update-ready` fires
+     * when the installer opens, `update-error` on failure.
+     */
+    @JavascriptInterface
+    fun installUpdate(url: String) {
+        updater.install(url.trim())
+    }
 
     /**
      * Streams `appName` from the host at `hostIp`. Fully headless: adds the

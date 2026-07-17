@@ -13,6 +13,7 @@ import {
   WifiOff,
   User,
   ArrowLeft,
+  Download,
 } from 'lucide-react'
 import { InputProvider, useConsoleInput, useInputLayer } from '../console/input/InputProvider'
 import { initSounds, disposeSounds, playSfx, soundsEnabled, setSoundsEnabled } from '../console/audio/sounds'
@@ -138,7 +139,7 @@ function GlobalLayer({ onQuickMenu }) {
  * Quick Menu — faithful port of the desktop console's control center:
  * slides up from the bottom, horizontal items, clock in the head.
  */
-function QuickMenu({ onClose, onRefresh, onSignOut, userEmail }) {
+function QuickMenu({ onClose, onRefresh, onSignOut, userEmail, update, onInstallUpdate }) {
   const [index, setIndex] = useState(0)
   const [soundsOn, setSoundsOn] = useState(soundsEnabled())
   const [confirmingSignOut, setConfirmingSignOut] = useState(false)
@@ -149,31 +150,38 @@ function QuickMenu({ onClose, onRefresh, onSignOut, userEmail }) {
     return () => clearInterval(id)
   }, [])
 
-  const items = useMemo(
-    () => [
-      { id: 'resume', label: 'Resume', icon: ArrowLeft },
-      {
-        id: 'sounds',
-        label: soundsOn ? 'Sounds On' : 'Sounds Off',
-        icon: soundsOn ? Volume2 : VolumeX,
-        active: soundsOn,
-      },
-      {
-        id: 'refresh',
-        label: 'Refresh Library',
-        sub: 'Pull the latest from your PC',
-        icon: RefreshCw,
-      },
-      {
-        id: 'signout',
-        label: confirmingSignOut ? 'Press Again to Sign Out' : 'Sign Out',
-        sub: confirmingSignOut ? 'You will need a new link code' : userEmail,
-        icon: LogOut,
-        danger: true,
-      },
-    ],
-    [soundsOn, confirmingSignOut, userEmail],
-  )
+  const items = useMemo(() => {
+    const list = [{ id: 'resume', label: 'Resume', icon: ArrowLeft }]
+    if (update) {
+      list.push({
+        id: 'update',
+        label: `Install Update ${update.version}`,
+        sub: 'Downloads and opens the installer',
+        icon: Download,
+        active: true,
+      })
+    }
+    list.push({
+      id: 'sounds',
+      label: soundsOn ? 'Sounds On' : 'Sounds Off',
+      icon: soundsOn ? Volume2 : VolumeX,
+      active: soundsOn,
+    })
+    list.push({
+      id: 'refresh',
+      label: 'Refresh Library',
+      sub: 'Pull the latest from your PC',
+      icon: RefreshCw,
+    })
+    list.push({
+      id: 'signout',
+      label: confirmingSignOut ? 'Press Again to Sign Out' : 'Sign Out',
+      sub: confirmingSignOut ? 'You will need a new link code' : userEmail,
+      icon: LogOut,
+      danger: true,
+    })
+    return list
+  }, [soundsOn, confirmingSignOut, userEmail, update])
 
   const activate = useCallback(
     (item) => {
@@ -192,6 +200,10 @@ function QuickMenu({ onClose, onRefresh, onSignOut, userEmail }) {
           onRefresh()
           onClose()
           break
+        case 'update':
+          onInstallUpdate()
+          onClose()
+          break
         case 'signout':
           if (confirmingSignOut) onSignOut()
           else setConfirmingSignOut(true)
@@ -200,7 +212,7 @@ function QuickMenu({ onClose, onRefresh, onSignOut, userEmail }) {
           break
       }
     },
-    [onClose, onRefresh, onSignOut, confirmingSignOut],
+    [onClose, onRefresh, onSignOut, onInstallUpdate, confirmingSignOut],
   )
 
   useInputLayer((action) => {
@@ -315,6 +327,9 @@ function ConsoleHome({
   onlineHosts,
   libLoading,
   starting,
+  update,
+  updating,
+  onInstallUpdate,
   onPlay,
   onCancel,
   onRefresh,
@@ -622,10 +637,19 @@ function ConsoleHome({
           onRefresh={onRefresh}
           onSignOut={onSignOut}
           userEmail={user?.email || ''}
+          update={update}
+          onInstallUpdate={onInstallUpdate}
         />
       )}
 
       {starting && <StartingOverlay starting={starting} onCancel={onCancel} />}
+
+      {updating && (
+        <div className="rc-update-pill">
+          <span className="rc-update-pill__ring" />
+          Downloading update… {updating.pct}%
+        </div>
+      )}
 
       {toast && <div className={`m-toast m-toast--${toast.kind}`}>{toast.message}</div>}
     </div>

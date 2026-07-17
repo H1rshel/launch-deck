@@ -10,6 +10,8 @@ import {
   nativeStartStream,
   nativeCancelStream,
   nativePrewarm,
+  nativeAppVersion,
+  nativeInstallUpdate,
   onNativeEvent,
 } from './nativeShell'
 import RemoteConsole from './RemoteConsole'
@@ -20,6 +22,18 @@ import './mobile.css'
 // games in the real Console Mode UI, marks which are streamable from an
 // online host PC, and hands the stream to the embedded engine (pairing is
 // invisible, relayed through the same command bus the desktop uses).
+
+const RELEASES_URL = 'https://api.github.com/repos/H1rshel/launch-deck/releases?per_page=20'
+
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d) return d
+  }
+  return 0
+}
 
 export default function MobileApp() {
   const { user, loading, signInWithGoogle, signingIn, error: authError, signOut } = useAuth()
@@ -199,6 +213,14 @@ export default function MobileApp() {
       } else if (ev.type === 'stream-error') {
         setStarting(null)
         showToast(ev.message || 'Stream failed', 'error')
+      } else if (ev.type === 'update-progress') {
+        setUpdating({ pct: Number(ev.pct) || 0 })
+      } else if (ev.type === 'update-ready') {
+        setUpdating(null)
+        showToast('Update downloaded — confirm the install prompt', 'success')
+      } else if (ev.type === 'update-error') {
+        setUpdating(null)
+        showToast(ev.message || 'Update failed', 'error')
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,6 +239,43 @@ export default function MobileApp() {
       }
     }
   }, [onlineHosts])
+
+  // ── In-app updates: check GitHub releases against the installed version ──
+  const [update, setUpdate] = useState(null) // { version, url } | null
+  const [updating, setUpdating] = useState(null) // { pct } | null
+  useEffect(() => {
+    if (!isNativeShell() || !user?.id) return
+    const current = nativeAppVersion()
+    if (!current) return
+    let stale = false
+    ;(async () => {
+      try {
+        const res = await fetch(RELEASES_URL)
+        const rels = await res.json()
+        const latest = (Array.isArray(rels) ? rels : []).find((r) =>
+          r.tag_name?.startsWith('remote-v'),
+        )
+        if (!latest) return
+        const version = latest.tag_name.slice('remote-v'.length)
+        const asset = (latest.assets || []).find((a) => a.name?.endsWith('.apk'))
+        if (!stale && asset && compareVersions(version, current) > 0) {
+          setUpdate({ version, url: asset.browser_download_url })
+          showToast(`Update ${version} is ready — install it from the Quick Menu`, 'success')
+        }
+      } catch { /* offline or rate-limited — try again next launch */ }
+    })()
+    return () => { stale = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id])
+
+  const installUpdate = useCallback(() => {
+    if (!update) return
+    setUpdating({ pct: 0 })
+    if (!nativeInstallUpdate(update.url)) {
+      setUpdating(null)
+      showToast('Could not start the update', 'error')
+    }
+  }, [update, showToast])
 
   // ── Start a stream ──
   const startStream = useCallback(
@@ -349,6 +408,9 @@ export default function MobileApp() {
       libLoading={libLoading}
       starting={starting}
       toast={toast}
+      update={update}
+      updating={updating}
+      onInstallUpdate={installUpdate}
       onPlay={handlePlay}
       onCancel={cancelStreaming}
       onRefresh={refresh}

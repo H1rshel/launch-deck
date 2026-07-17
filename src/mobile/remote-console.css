@@ -137,6 +137,35 @@
   to { transform: rotate(360deg); }
 }
 
+/* Update download progress pill */
+.rc-update-pill {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10400;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #d9f7ff;
+  background: rgba(8, 14, 26, 0.92);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.6);
+  animation: cos-fade-up 0.3s ease both;
+}
+.rc-update-pill__ring {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 212, 255, 0.25);
+  border-top-color: #00d4ff;
+  animation: rc-spin 0.9s linear infinite;
+}
+
 /* Generic center / spinner (pre-css-load safe) */
 .rc-center {
   position: absolute;

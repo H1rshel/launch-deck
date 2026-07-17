@@ -24,6 +24,25 @@ export function nativePrewarm(hostIp) {
   } catch { /* older shell without prewarm — ignore */ }
 }
 
+/** Installed APK version ("2.1.2") or null on older shells. */
+export function nativeAppVersion() {
+  try {
+    return window.LaunchDeckNative.appVersion?.() || null
+  } catch {
+    return null
+  }
+}
+
+/** Download + install a release APK (system installer confirms). */
+export function nativeInstallUpdate(url) {
+  try {
+    window.LaunchDeckNative.installUpdate?.(url)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function nativeCancelStream() {
   try {
     window.LaunchDeckNative.cancelStream()

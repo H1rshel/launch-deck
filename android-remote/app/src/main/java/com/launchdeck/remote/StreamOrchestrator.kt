@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import com.limelight.binding.PlatformBinding
+import com.limelight.computers.ComputerManagerListener
 import com.limelight.computers.ComputerManagerService
 import com.limelight.nvstream.http.ComputerDetails
 import com.limelight.nvstream.http.NvApp
@@ -44,6 +45,11 @@ class StreamOrchestrator(private val activity: MainActivity) {
             val localBinder = service as ComputerManagerService.ComputerManagerBinder
             Thread {
                 localBinder.waitForReady()
+                // Poll all known PCs continuously (what PcView does onResume):
+                // this is what resolves state + activeAddress. Without it a
+                // DB-loaded PC stays UNKNOWN forever and launch NPEs on a
+                // null activeAddress.
+                localBinder.startPolling(ComputerManagerListener { })
                 binder = localBinder
                 binderLatch.countDown()
             }.start()
@@ -183,10 +189,10 @@ class StreamOrchestrator(private val activity: MainActivity) {
             ?: apps.firstOrNull { it.appName.contains(appName, ignoreCase = true) }
             ?: throw IllegalStateException("'$appName' is not shared by the host (${apps.size} apps visible)")
 
-        // Refresh computer state and launch the video activity
+        // Launch the video activity as soon as the poller confirms the PC is
+        // reachable (usually immediate thanks to prewarm + background polling).
         emit("stream-status", "step" to "launch")
-        mgr.invalidateStateForComputer(computer.uuid)
-        val ready = waitForOnline(mgr, computer.uuid, 10_000)
+        val ready = waitForOnline(mgr, computer.uuid, 12_000)
         if (cancelled.get()) throw InterruptedException()
 
         val intent = ServerHelper.createStartIntent(activity, target, ready, mgr)
@@ -212,25 +218,32 @@ class StreamOrchestrator(private val activity: MainActivity) {
         }
     }
 
-    /** Poll until the computer is ONLINE with an active address (or timeout). */
+    /** Poll until the computer is ONLINE with an active address (or fail). */
     private fun waitForOnline(
         mgr: ComputerManagerService.ComputerManagerBinder,
         uuid: String,
         timeoutMs: Long,
     ): ComputerDetails {
         val deadline = System.currentTimeMillis() + timeoutMs
-        var last: ComputerDetails? = null
         while (System.currentTimeMillis() < deadline) {
-            last = mgr.getComputer(uuid)
-            if (last != null && last.state == ComputerDetails.State.ONLINE && last.activeAddress != null) {
-                return last
+            val details = mgr.getComputer(uuid)
+            if (details != null && details.state == ComputerDetails.State.ONLINE && details.activeAddress != null) {
+                return details
             }
-            Thread.sleep(400)
+            if (cancelled.get()) throw InterruptedException()
+            Thread.sleep(300)
         }
-        return last ?: throw IllegalStateException("Host PC state unknown")
+        // Never hand a computer without an activeAddress to the launcher —
+        // that is a guaranteed NPE inside the engine.
+        throw IllegalStateException("Could not reach the host PC — make sure both devices are on the same network")
     }
 
     fun shutdown() {
+        try {
+            binder?.stopPolling()
+        } catch (_: Exception) {
+            // service already gone
+        }
         try {
             activity.unbindService(serviceConnection)
         } catch (_: Exception) {
