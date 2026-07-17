@@ -32,6 +32,15 @@ class NativeBridge(
         }
     }
 
+    /**
+     * Registers + pairs the host ahead of a stream so the eventual tap is
+     * near-instant. Idempotent; safe to call whenever an online host is known.
+     */
+    @JavascriptInterface
+    fun prewarm(hostIp: String) {
+        activity.runOnUiThread { activity.orchestrator().prewarm(hostIp.trim()) }
+    }
+
     /** Cancels an in-flight startStream (best effort). */
     @JavascriptInterface
     fun cancelStream() {

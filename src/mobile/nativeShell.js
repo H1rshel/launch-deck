@@ -14,6 +14,16 @@ export function nativeStartStream(hostIp, appName) {
   window.LaunchDeckNative.startStream(hostIp, appName)
 }
 
+/**
+ * Register + pair the host ahead of a stream so the eventual tap is
+ * near-instant. Idempotent; call when an online host becomes known.
+ */
+export function nativePrewarm(hostIp) {
+  try {
+    window.LaunchDeckNative.prewarm?.(hostIp)
+  } catch { /* older shell without prewarm — ignore */ }
+}
+
 export function nativeCancelStream() {
   try {
     window.LaunchDeckNative.cancelStream()
