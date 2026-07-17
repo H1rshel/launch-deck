@@ -50,10 +50,8 @@ export async function loadDurableTrace() {
       events.length = 0
       events.push(...fileLines.slice(-30), '────── app restarted ──────')
     }
-    const reasons = await invoke('get_last_exit_reasons').catch(() => [])
-    for (const r of reasons || []) {
-      events.push(`prev exit: ${String(r).slice(0, 160)}`)
-    }
+    // NOTE: get_last_exit_reasons deliberately NOT called here — the JNI
+    // call itself proved risky at startup. The durable file log suffices.
     window.dispatchEvent(new CustomEvent(AUTH_DEBUG_EVENT))
   } catch { /* diagnostics must never break the app */ }
 }

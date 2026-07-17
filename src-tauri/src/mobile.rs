@@ -245,9 +245,15 @@ mod android {
                     &[(&svc).into()],
                 )?
                 .l()?;
+            if am.is_null() {
+                return Ok(Vec::new());
+            }
             let pkg_obj = env
                 .call_method(context, "getPackageName", "()Ljava/lang/String;", &[])?
                 .l()?;
+            if pkg_obj.is_null() {
+                return Ok(Vec::new());
+            }
             let list = env
                 .call_method(
                     am,
@@ -256,6 +262,9 @@ mod android {
                     &[(&pkg_obj).into(), JValue::Int(0), JValue::Int(4)],
                 )?
                 .l()?;
+            if list.is_null() {
+                return Ok(Vec::new());
+            }
             let size = env.call_method(&list, "size", "()I", &[])?.i()?;
             let mut out = Vec::new();
             for i in 0..size.min(4) {
