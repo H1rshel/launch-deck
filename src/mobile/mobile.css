@@ -251,3 +251,14 @@ html, body {
   font-family: Consolas, monospace;
 }
 .m-login__or { color: var(--m-muted); margin: 2px 0; font-size: 13px; }
+
+/* Library-screen trace overlay (diagnostic builds) */
+.m-trace--overlay {
+  position: fixed;
+  left: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  max-width: 60vw;
+  z-index: 150;
+  background: rgba(4, 6, 11, 0.85);
+  pointer-events: none;
+}

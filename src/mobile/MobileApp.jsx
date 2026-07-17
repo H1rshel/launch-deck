@@ -77,6 +77,7 @@ export default function MobileApp() {
   // button that renders under the same finger position — arm buttons late.
   const [sheetArmed, setSheetArmed] = useState(false)
   const setSheet = useCallback((next) => {
+    logAuth('sheet', next ? next.type : 'closed')
     setSheetRaw(next)
     setSheetArmed(false)
   }, [])
@@ -296,6 +297,7 @@ export default function MobileApp() {
       setSheet({ type: 'starting', game, source })
       try {
         const myId = await getDeviceId()
+        logAuth('prepare_stream sent', source.hostname)
         const prep = await sendCommand(
           user.id,
           myId,
@@ -304,12 +306,15 @@ export default function MobileApp() {
           { gameId: game.game_id },
           { timeoutMs: 45_000 },
         )
+        logAuth('prepare ok', (prep.appName || '?') + ' @ ' + (prep.hostname || source.hostname))
         await invoke('launch_moonlight_stream', {
           pcName: prep.hostname || source.hostname,
           appName: prep.appName || null,
         })
+        logAuth('trampoline LAUNCHED')
         setSheet(null)
       } catch (err) {
+        logAuth('stream FAILED', String(err?.message || err).slice(0, 60))
         setSheet(null)
         showToast(err?.message || 'Could not start the stream', 'error')
       }
@@ -319,6 +324,7 @@ export default function MobileApp() {
 
   const handlePlay = useCallback(
     async (game, source) => {
+      logAuth('tap', (game.normalized_title || game.title || '').slice(0, 24) + (source ? ' [streamable]' : ' [no source]'))
       if (!source) {
         showToast(
           onlineHosts.length
@@ -330,13 +336,16 @@ export default function MobileApp() {
       let installed = false
       try {
         installed = await invoke('is_moonlight_installed')
-      } catch { /* not android / bridge missing */ }
+      } catch (e) { logAuth('installed check ERR', String(e).slice(0, 50)) }
+      logAuth('engine installed', String(installed))
 
       if (!installed) {
         setSheet({ type: 'install', game, source })
         return
       }
-      if (!getPairedHosts().includes(source.deviceId)) {
+      const paired = getPairedHosts().includes(source.deviceId)
+      logAuth('paired with host', String(paired))
+      if (!paired) {
         setPin('')
         setSheet({ type: 'pair', game, source })
         return
@@ -557,6 +566,14 @@ export default function MobileApp() {
       )}
 
       {toast && <div className={`m-toast m-toast--${toast.kind}`}>{toast.message}</div>}
+
+      {trace.length > 0 && (
+        <div className="m-trace m-trace--overlay">
+          {trace.slice(-7).map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -2321,7 +2321,7 @@ dependencies = [
 
 [[package]]
 name = "launch-deck"
-version = "0.1.69"
+version = "0.1.70"
 dependencies = [
  "base64 0.22.1",
  "dotenv",
