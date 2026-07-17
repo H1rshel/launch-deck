@@ -24,7 +24,13 @@ mod android {
         let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| e.to_string())?;
         let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
         let context = unsafe { JObject::from_raw(ctx.context().cast()) };
-        f(&mut env, &context).map_err(|e| e.to_string())
+        let result = f(&mut env, &context);
+        // A pending Java exception left on the thread ABORTS the process on
+        // the next JNI call — always clear it before surfacing the error.
+        if result.is_err() && env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+        result.map_err(|e| e.to_string())
     }
 
     fn our_package(
