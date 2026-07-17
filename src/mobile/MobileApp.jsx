@@ -328,6 +328,29 @@ export default function MobileApp() {
     setStarting(null)
   }, [])
 
+  // Favorite toggle — optimistic locally, written to the cloud row so the
+  // desktop picks it up through its normal LWW pull.
+  const toggleFavorite = useCallback(
+    async (game) => {
+      const next = !game.favorite
+      setGames((rows) =>
+        rows.map((g) => (g.game_id === game.game_id ? { ...g, favorite: next } : g)),
+      )
+      const { error } = await supabase
+        .from('games')
+        .update({ favorite: next, updated_at: new Date().toISOString() })
+        .eq('user_id', user.id)
+        .eq('game_id', game.game_id)
+      if (error) {
+        setGames((rows) =>
+          rows.map((g) => (g.game_id === game.game_id ? { ...g, favorite: !next } : g)),
+        )
+        showToast('Could not update favorite', 'error')
+      }
+    },
+    [user?.id, showToast],
+  )
+
   // ── Screens ──────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -415,6 +438,7 @@ export default function MobileApp() {
       onCancel={cancelStreaming}
       onRefresh={refresh}
       onSignOut={signOut}
+      onToggleFavorite={toggleFavorite}
     />
   )
 }

@@ -137,6 +137,132 @@
   to { transform: rotate(360deg); }
 }
 
+/* ── Search overlay (Y) ── */
+.rc-search__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 10250;
+  background: rgba(2, 4, 10, 0.6);
+  backdrop-filter: blur(10px);
+  display: flex;
+  justify-content: center;
+  padding-top: 9vh;
+  animation: cos-appear 0.2s ease both;
+}
+.rc-search {
+  width: min(560px, 88vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: cos-fade-up 0.28s ease both;
+}
+.rc-search__box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  border-radius: 14px;
+  color: #eaf6ff;
+  background: rgba(10, 16, 30, 0.92);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.65);
+}
+.rc-search__input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.rc-search__input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+.rc-search__results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rc-search__row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: rgba(10, 16, 30, 0.85);
+  color: #dfe9f5;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.rc-search__row--focused {
+  border-color: rgba(0, 212, 255, 0.6);
+  background: rgba(0, 212, 255, 0.1);
+  box-shadow: 0 0 22px rgba(0, 212, 255, 0.18);
+}
+.rc-search__thumb {
+  position: relative;
+  width: 34px;
+  height: 48px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex: none;
+}
+.rc-search__thumb-img {
+  position: absolute;
+  inset: 0;
+}
+.rc-search__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rc-search__chip {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #00d4ff;
+  background: rgba(0, 212, 255, 0.12);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+}
+.rc-search__none {
+  margin: 4px 6px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.9rem;
+}
+
+/* Empty favorites tab */
+.rc-fav-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.55);
+  animation: cos-fade-up 0.35s ease both;
+}
+.rc-fav-empty svg {
+  color: rgba(255, 92, 122, 0.8);
+}
+.rc-fav-empty p {
+  margin: 4px 0 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+}
+.rc-fav-empty span {
+  font-size: 0.85rem;
+}
+
 /* Update download progress pill */
 .rc-update-pill {
   position: absolute;

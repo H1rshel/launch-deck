@@ -40,12 +40,14 @@ const REPEAT_INTERVAL_MS = 125
 /** Best-effort controller family from the gamepad id string. */
 export function detectPadType(id = '') {
   const s = id.toLowerCase()
+  // Note: a bare "Wireless Controller" id is NOT treated as PlayStation —
+  // many generic pads report that string but have Xbox-style face buttons;
+  // genuine Sony pads carry the 054c vendor id in the id string anyway.
   if (
     s.includes('dualsense') ||
     s.includes('dualshock') ||
     s.includes('054c') || // Sony vendor id
-    s.includes('playstation') ||
-    s.includes('wireless controller')
+    s.includes('playstation')
   ) {
     return 'ps'
   }

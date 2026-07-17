@@ -14,11 +14,13 @@ import {
   User,
   ArrowLeft,
   Download,
+  Search,
 } from 'lucide-react'
 import { InputProvider, useConsoleInput, useInputLayer } from '../console/input/InputProvider'
 import { initSounds, disposeSounds, playSfx, soundsEnabled, setSoundsEnabled } from '../console/audio/sounds'
 import HintBar, { ButtonGlyph } from '../console/components/HintBar'
 import { ImageWithFallback } from '../components/ui/GameImages'
+import { useProfileAvatar } from '../hooks/useProfileAvatar'
 import consoleModeTransitionSfx from '../assets/sounds/console-mode-transition.mp3'
 import '../styles/console-mode.css'
 import './remote-console.css'
@@ -71,8 +73,14 @@ function useOnline() {
   return online
 }
 
-function RemoteStatusBar({ user, hostName }) {
+const TABS = [
+  { id: 'home', label: 'Home' },
+  { id: 'favorites', label: 'Favorites' },
+]
+
+function RemoteStatusBar({ user, hostName, tab, onTabChange }) {
   const { gamepadConnected } = useConsoleInput()
+  const { avatarUrl } = useProfileAvatar()
   const isOnline = useOnline()
   const now = useClock()
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -89,7 +97,23 @@ function RemoteStatusBar({ user, hostName }) {
         <span className="rc-remote-tag">REMOTE</span>
       </div>
 
-      <div className="rc-host">
+      <nav className="cos-statusbar__tabs">
+        <ButtonGlyph action="lb" />
+        <div className="cos-statusbar__tab-strip">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`cos-statusbar__tab ${tab === t.id ? 'cos-statusbar__tab--active' : ''}`}
+              onClick={() => onTabChange(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <ButtonGlyph action="rb" />
+      </nav>
+
+      <div className="cos-statusbar__system">
         {hostName ? (
           <span className="rc-host__chip rc-host__chip--online">
             <span className="rc-host__dot" /> {hostName}
@@ -97,9 +121,6 @@ function RemoteStatusBar({ user, hostName }) {
         ) : (
           <span className="rc-host__chip">No PC online</span>
         )}
-      </div>
-
-      <div className="cos-statusbar__system">
         <span
           className={`cos-statusbar__pad ${gamepadConnected ? 'cos-statusbar__pad--on' : ''}`}
         >
@@ -113,9 +134,13 @@ function RemoteStatusBar({ user, hostName }) {
           <span className="cos-statusbar__date">{date}</span>
         </div>
         <div className="cos-statusbar__user" title={username}>
-          <span className="cos-statusbar__avatar cos-statusbar__avatar--fallback">
-            <User size={15} />
-          </span>
+          {avatarUrl ? (
+            <img src={avatarUrl} alt={username} className="cos-statusbar__avatar" />
+          ) : (
+            <span className="cos-statusbar__avatar cos-statusbar__avatar--fallback">
+              <User size={15} />
+            </span>
+          )}
         </div>
       </div>
     </header>
@@ -286,6 +311,107 @@ function QuickMenu({ onClose, onRefresh, onSignOut, userEmail, update, onInstall
   )
 }
 
+/** Y — find a game by name. Uses the real keyboard/IME; controller navigates results. */
+function SearchOverlay({ games, sourceMap, onSelect, onClose }) {
+  const { setTextEntry } = useConsoleInput()
+  const [query, setQuery] = useState('')
+  const [index, setIndex] = useState(0)
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    setTextEntry(true)
+    const t = setTimeout(() => inputRef.current?.focus(), 60)
+    return () => {
+      clearTimeout(t)
+      setTextEntry(false)
+    }
+  }, [setTextEntry])
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return []
+    const title = (g) => (g.normalized_title || g.title || '').toLowerCase()
+    const starts = games.filter((g) => title(g).startsWith(q))
+    const contains = games.filter((g) => !title(g).startsWith(q) && title(g).includes(q))
+    return [...starts, ...contains].slice(0, 8)
+  }, [games, query])
+
+  useEffect(() => { setIndex(0) }, [query])
+
+  useInputLayer((action) => {
+    switch (action) {
+      case 'up':
+        playSfx('nav')
+        setIndex((i) => Math.max(0, i - 1))
+        return
+      case 'down':
+        playSfx('nav')
+        setIndex((i) => Math.min(Math.max(results.length - 1, 0), i + 1))
+        return
+      case 'accept':
+        if (results[index]) { playSfx('select'); onSelect(results[index]) }
+        return
+      case 'back':
+        playSfx('back')
+        onClose()
+        return
+      default:
+        return
+    }
+  })
+
+  return (
+    <div className="rc-search__backdrop" onClick={onClose}>
+      <div className="rc-search" onClick={(e) => e.stopPropagation()}>
+        <div className="rc-search__box">
+          <Search size={19} />
+          <input
+            ref={inputRef}
+            className="rc-search__input"
+            placeholder="Search your library…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <span className="rc-search__hint">
+            <ButtonGlyph action="back" />
+          </span>
+        </div>
+        {results.length > 0 && (
+          <div className="rc-search__results">
+            {results.map((game, i) => {
+              const streamable = sourceMap.has(game.game_id)
+              return (
+                <button
+                  key={game.game_id}
+                  className={`rc-search__row ${i === index ? 'rc-search__row--focused' : ''}`}
+                  onMouseEnter={() => setIndex(i)}
+                  onClick={() => { playSfx('select'); onSelect(game) }}
+                >
+                  <span className="rc-search__thumb">
+                    <ImageWithFallback
+                      primary={game.cover_url}
+                      fallback={game.hero_url}
+                      alt={game.normalized_title || game.title}
+                      className="rc-search__thumb-img"
+                    />
+                  </span>
+                  <span className="rc-search__name">{game.normalized_title || game.title}</span>
+                  {streamable && <span className="rc-search__chip">Stream</span>}
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {query.trim() && results.length === 0 && (
+          <p className="rc-search__none">Nothing matches “{query.trim()}”</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const STEP_TEXT = {
   engine: 'Starting the streaming engine…',
   connect: 'Contacting your PC…',
@@ -334,6 +460,7 @@ function ConsoleHome({
   onCancel,
   onRefresh,
   onSignOut,
+  onToggleFavorite,
   toast,
 }) {
   const { device, gamepadConnected } = useConsoleInput()
@@ -341,18 +468,32 @@ function ConsoleHome({
   const [zone, setZone] = useState('tiles')
   const [actionIndex, setActionIndex] = useState(0)
   const [quickMenu, setQuickMenu] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [tab, setTab] = useState('home')
   const prevOffsetsRef = useRef(new Map())
 
-  const n = games.length
-  let selectedIndex = games.findIndex((g) => g.game_id === selectedId)
+  const visibleGames = useMemo(
+    () => (tab === 'favorites' ? games.filter((g) => g.favorite) : games),
+    [games, tab],
+  )
+
+  const n = visibleGames.length
+  let selectedIndex = visibleGames.findIndex((g) => g.game_id === selectedId)
   if (selectedIndex === -1) selectedIndex = 0
-  const focused = games[selectedIndex] || null
+  const focused = visibleGames[selectedIndex] || null
 
   useEffect(() => {
-    if (n && !games.some((g) => g.game_id === selectedId)) {
-      setSelectedId(games[0].game_id)
+    if (n && !visibleGames.some((g) => g.game_id === selectedId)) {
+      setSelectedId(visibleGames[0].game_id)
     }
-  }, [games, selectedId, n])
+  }, [visibleGames, selectedId, n])
+
+  const switchTab = useCallback((next) => {
+    if (!next || next === tab) return
+    playSfx('nav')
+    setTab(next)
+    setZone('tiles')
+  }, [tab])
 
   const focusedSource = focused ? sourceMap.get(focused.game_id)?.[0] || null : null
   const description = focused ? descMap.get(focused.game_id) || '' : ''
@@ -385,9 +526,9 @@ function ConsoleHome({
       if (n < 2) return
       const next = (selectedIndex + delta + n) % n
       playSfx('nav')
-      setSelectedId(games[next].game_id)
+      setSelectedId(visibleGames[next].game_id)
     },
-    [n, selectedIndex, games],
+    [n, selectedIndex, visibleGames],
   )
 
   useInputLayer((action) => {
@@ -410,10 +551,21 @@ function ConsoleHome({
         if (zone === 'tiles') { if (focused) { playSfx('select'); onPlay(focused, focusedSource) } }
         else runAction(actions[actionIndex])
         return
+      case 'lb':
+      case 'rb':
+        switchTab(tab === 'home' ? 'favorites' : 'home')
+        return
+      case 'actionX':
+        if (focused) { playSfx('select'); onToggleFavorite(focused) }
+        return
+      case 'actionY':
+        playSfx('open')
+        setSearchOpen(true)
+        return
       default:
         return false
     }
-  }, !starting && !quickMenu)
+  }, !starting && !quickMenu && !searchOpen)
 
   const onWheel = useCallback(
     (e) => {
@@ -444,10 +596,10 @@ function ConsoleHome({
     for (let i = 0; i < n; i++) {
       const d = wrapOffset(i, selectedIndex, n)
       if (Math.abs(d) > VISIBLE) continue
-      tiles.push({ game: games[i], offset: d })
+      tiles.push({ game: visibleGames[i], offset: d })
     }
     return tiles
-  }, [games, selectedIndex, n])
+  }, [visibleGames, selectedIndex, n])
 
   const prevOffsets = prevOffsetsRef.current
   useEffect(() => {
@@ -460,15 +612,17 @@ function ConsoleHome({
     () => [
       { action: 'dirH', label: 'Browse' },
       { action: 'accept', label: focusedSource ? 'Stream' : 'Select' },
+      { action: 'actionX', label: focused?.favorite ? 'Unfavorite' : 'Favorite' },
+      { action: 'actionY', label: 'Search' },
       { action: 'menu', label: 'Quick Menu' },
     ],
-    [focusedSource],
+    [focusedSource, focused?.favorite],
   )
 
   const genres = (focused?.genres || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 3)
   const edgePad = (TILE_W * SEL_SCALE - TILE_W) / 2 + 10
 
-  if (libLoading && !n) {
+  if (libLoading && !games.length) {
     return (
       <div className="console-os" data-device={device}>
         <div className="cos-ambient" aria-hidden="true" />
@@ -477,7 +631,7 @@ function ConsoleHome({
     )
   }
 
-  if (!n) {
+  if (!games.length) {
     return (
       <div className="console-os console-os--empty" data-device={device}>
         <div className="cos-ambient" aria-hidden="true" />
@@ -513,7 +667,12 @@ function ConsoleHome({
 
       <GlobalLayer onQuickMenu={() => setQuickMenu(true)} />
 
-      <RemoteStatusBar user={user} hostName={onlineHosts[0]?.hostname || null} />
+      <RemoteStatusBar
+        user={user}
+        hostName={onlineHosts[0]?.hostname || null}
+        tab={tab}
+        onTabChange={switchTab}
+      />
 
       <main className="cos-content">
         <div className="cos-home">
@@ -567,6 +726,15 @@ function ConsoleHome({
               <span className="cos-home__counter">
                 {selectedIndex + 1} <em>/</em> {n}
               </span>
+            )}
+            {tab === 'favorites' && n === 0 && (
+              <div className="rc-fav-empty">
+                <Heart size={26} />
+                <p>No favorites yet</p>
+                <span>
+                  Press <b>X</b> on a game (or favorite it on your PC) and it will live here.
+                </span>
+              </div>
             )}
           </div>
 
@@ -639,6 +807,20 @@ function ConsoleHome({
           userEmail={user?.email || ''}
           update={update}
           onInstallUpdate={onInstallUpdate}
+        />
+      )}
+
+      {searchOpen && (
+        <SearchOverlay
+          games={games}
+          sourceMap={sourceMap}
+          onClose={() => setSearchOpen(false)}
+          onSelect={(game) => {
+            setSearchOpen(false)
+            if (tab === 'favorites' && !game.favorite) setTab('home')
+            setSelectedId(game.game_id)
+            setZone('tiles')
+          }}
         />
       )}
 
