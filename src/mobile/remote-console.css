@@ -48,23 +48,8 @@
 }
 
 /* Games without an online source: dimmed, still browsable */
-.rc-tile--offline .cos-tile__img,
-.rc-tile--offline .rc-tile__ph {
+.rc-tile--offline .cos-tile__img {
   filter: grayscale(0.7) brightness(0.55);
-}
-
-.rc-tile__ph {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  padding: 10px;
-  text-align: center;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.75);
-  background: linear-gradient(160deg, #182032, #0a0f1c);
 }
 
 /* Hero description */
@@ -79,46 +64,6 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   animation: cos-fade-up 0.45s ease both;
-}
-
-/* ── Quick menu ── */
-.rc-menu__backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 10200;
-  background: rgba(2, 4, 10, 0.55);
-  backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  animation: cos-appear 0.2s ease both;
-}
-.rc-menu {
-  width: min(340px, 86vw);
-  height: 100%;
-  padding: 76px 26px 26px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: linear-gradient(200deg, rgba(16, 22, 38, 0.96), rgba(6, 9, 18, 0.98));
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
-  animation: cos-quickmenu-side 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes cos-quickmenu-side {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(0); }
-}
-.rc-menu__title {
-  margin: 0 0 10px;
-  font-size: 0.8rem;
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.45);
-}
-.rc-menu__item {
-  justify-content: flex-start;
-  width: 100%;
 }
 
 /* ── Starting overlay ── */

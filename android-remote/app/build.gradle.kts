@@ -27,8 +27,8 @@ android {
         applicationId = "com.launchdeck.remote"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2100
-        versionName = "2.1.0"
+        versionCode = 2101
+        versionName = "2.1.1"
         // Consume the nonRoot flavor of the moonlight engine module
         missingDimensionStrategy("root", "nonRoot")
         ndk {

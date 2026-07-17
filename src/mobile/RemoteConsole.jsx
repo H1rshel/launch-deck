@@ -12,11 +12,12 @@ import {
   Wifi,
   WifiOff,
   User,
-  X,
+  ArrowLeft,
 } from 'lucide-react'
 import { InputProvider, useConsoleInput, useInputLayer } from '../console/input/InputProvider'
 import { initSounds, disposeSounds, playSfx, soundsEnabled, setSoundsEnabled } from '../console/audio/sounds'
-import HintBar from '../console/components/HintBar'
+import HintBar, { ButtonGlyph } from '../console/components/HintBar'
+import { ImageWithFallback } from '../components/ui/GameImages'
 import consoleModeTransitionSfx from '../assets/sounds/console-mode-transition.mp3'
 import '../styles/console-mode.css'
 import './remote-console.css'
@@ -133,45 +134,92 @@ function GlobalLayer({ onQuickMenu }) {
   return null
 }
 
-function QuickMenu({ onClose, onRefresh, onSignOut }) {
-  const [sounds, setSounds] = useState(soundsEnabled())
+/**
+ * Quick Menu — faithful port of the desktop console's control center:
+ * slides up from the bottom, horizontal items, clock in the head.
+ */
+function QuickMenu({ onClose, onRefresh, onSignOut, userEmail }) {
   const [index, setIndex] = useState(0)
+  const [soundsOn, setSoundsOn] = useState(soundsEnabled())
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false)
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 10000)
+    return () => clearInterval(id)
+  }, [])
 
   const items = useMemo(
     () => [
+      { id: 'resume', label: 'Resume', icon: ArrowLeft },
       {
         id: 'sounds',
-        label: sounds ? 'Sounds: On' : 'Sounds: Off',
-        icon: sounds ? Volume2 : VolumeX,
-        run: () => {
-          setSoundsEnabled(!sounds)
-          setSounds(!sounds)
-        },
+        label: soundsOn ? 'Sounds On' : 'Sounds Off',
+        icon: soundsOn ? Volume2 : VolumeX,
+        active: soundsOn,
       },
-      { id: 'refresh', label: 'Refresh library', icon: RefreshCw, run: () => { onRefresh(); onClose() } },
-      { id: 'signout', label: 'Sign out', icon: LogOut, run: onSignOut },
-      { id: 'close', label: 'Close', icon: X, run: onClose },
+      {
+        id: 'refresh',
+        label: 'Refresh Library',
+        sub: 'Pull the latest from your PC',
+        icon: RefreshCw,
+      },
+      {
+        id: 'signout',
+        label: confirmingSignOut ? 'Press Again to Sign Out' : 'Sign Out',
+        sub: confirmingSignOut ? 'You will need a new link code' : userEmail,
+        icon: LogOut,
+        danger: true,
+      },
     ],
-    [sounds, onRefresh, onSignOut, onClose],
+    [soundsOn, confirmingSignOut, userEmail],
+  )
+
+  const activate = useCallback(
+    (item) => {
+      playSfx('select')
+      switch (item.id) {
+        case 'resume':
+          onClose()
+          break
+        case 'sounds': {
+          const next = !soundsEnabled()
+          setSoundsEnabled(next)
+          setSoundsOn(next)
+          break
+        }
+        case 'refresh':
+          onRefresh()
+          onClose()
+          break
+        case 'signout':
+          if (confirmingSignOut) onSignOut()
+          else setConfirmingSignOut(true)
+          break
+        default:
+          break
+      }
+    },
+    [onClose, onRefresh, onSignOut, confirmingSignOut],
   )
 
   useInputLayer((action) => {
     switch (action) {
-      case 'up':
-        playSfx('nav')
-        setIndex((i) => Math.max(0, i - 1))
+      case 'left':
+        setConfirmingSignOut(false)
+        setIndex((i) => { if (i > 0) playSfx('nav'); return Math.max(0, i - 1) })
         return
-      case 'down':
-        playSfx('nav')
-        setIndex((i) => Math.min(items.length - 1, i + 1))
+      case 'right':
+        setConfirmingSignOut(false)
+        setIndex((i) => { if (i < items.length - 1) playSfx('nav'); return Math.min(items.length - 1, i + 1) })
         return
       case 'accept':
-        playSfx('select')
-        items[index]?.run()
+        activate(items[index])
         return
       case 'back':
       case 'menu':
         playSfx('back')
+        setConfirmingSignOut(false)
         onClose()
         return
       default:
@@ -179,24 +227,48 @@ function QuickMenu({ onClose, onRefresh, onSignOut }) {
     }
   })
 
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const date = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
+
   return (
-    <div className="rc-menu__backdrop" onClick={onClose}>
-      <div className="rc-menu" onClick={(e) => e.stopPropagation()}>
-        <h3 className="rc-menu__title">Quick Menu</h3>
-        {items.map((item, i) => {
-          const Icon = item.icon
-          return (
-            <button
-              key={item.id}
-              className={`cos-action rc-menu__item ${i === index ? 'cos-action--focused' : ''}`}
-              onMouseEnter={() => setIndex(i)}
-              onClick={() => { playSfx('select'); item.run() }}
-            >
-              <Icon size={18} />
-              <span>{item.label}</span>
-            </button>
-          )
-        })}
+    <div className="cos-quickmenu-backdrop" onClick={onClose}>
+      <div className="cos-quickmenu" onClick={(e) => e.stopPropagation()}>
+        <div className="cos-quickmenu__head">
+          <div className="cos-quickmenu__clock">
+            <span className="cos-quickmenu__time">{time}</span>
+            <span className="cos-quickmenu__date">{date}</span>
+          </div>
+          <span className="cos-quickmenu__hint">
+            <ButtonGlyph action="back" />
+            <span>Close</span>
+          </span>
+        </div>
+
+        <div className="cos-quickmenu__items">
+          {items.map((item, i) => {
+            const Icon = item.icon
+            const focusedItem = i === index
+            return (
+              <button
+                key={item.id}
+                className={[
+                  'cos-quickmenu__item',
+                  focusedItem ? 'cos-quickmenu__item--focused' : '',
+                  item.danger ? 'cos-quickmenu__item--danger' : '',
+                  item.active ? 'cos-quickmenu__item--active' : '',
+                ].join(' ')}
+                onMouseEnter={() => { setConfirmingSignOut(false); setIndex(i) }}
+                onClick={() => activate(item)}
+              >
+                <span className="cos-quickmenu__item-icon">
+                  <Icon size={22} />
+                </span>
+                <span className="cos-quickmenu__item-label">{item.label}</span>
+                {item.sub && <span className="cos-quickmenu__item-sub">{item.sub}</span>}
+              </button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -438,7 +510,6 @@ function ConsoleHome({
             {windowTiles.map(({ game, offset }) => {
               const isSelected = offset === 0
               const source = sourceMap.get(game.game_id)?.[0]
-              const cover = game.cover_url || game.hero_url
               const x = offset * (TILE_W + GAP) + Math.sign(offset) * edgePad
               const prev = prevOffsets.get(game.game_id)
               const teleported = prev !== undefined && Math.abs(prev - offset) > VISIBLE
@@ -460,11 +531,12 @@ function ConsoleHome({
                   }}
                   aria-label={game.normalized_title || game.title}
                 >
-                  {cover ? (
-                    <img className="cos-tile__img" src={cover} alt="" loading="lazy" />
-                  ) : (
-                    <span className="rc-tile__ph">{game.normalized_title || game.title}</span>
-                  )}
+                  <ImageWithFallback
+                    primary={game.cover_url}
+                    fallback={game.hero_url}
+                    alt={game.normalized_title || game.title}
+                    className="cos-tile__img"
+                  />
                   <span className="cos-tile__veil" aria-hidden="true" />
                   {game.favorite && (
                     <span className="cos-tile__fav">
@@ -549,6 +621,7 @@ function ConsoleHome({
           onClose={() => setQuickMenu(false)}
           onRefresh={onRefresh}
           onSignOut={onSignOut}
+          userEmail={user?.email || ''}
         />
       )}
 
