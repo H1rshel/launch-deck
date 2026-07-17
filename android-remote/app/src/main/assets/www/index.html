@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="./launch-deck-logo-alt.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Paint the app's dark background immediately so there is never a white
+         flash before the CSS/JS load and React mounts. -->
+    <style>
+      html, body { margin: 0; background: #0a0e17; }
+      #root { min-height: 100vh; background: #0a0e17; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Load fonts WITHOUT blocking first paint: fetch as a non-applied stylesheet,
+         then switch it on once loaded. Text shows instantly with a fallback and
+         swaps to the web font when ready (no blank window waiting on the network). -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geom:ital,wght@0,300..900;1,300..900&family=Sora:wght@300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Geom:ital,wght@0,300..900;1,300..900&family=Sora:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
+    <title>Launch Deck</title>
+    <script type="module" crossorigin src="./assets/index-RlzpHeiU.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-B5CdYMlv.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

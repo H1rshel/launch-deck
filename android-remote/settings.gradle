@@ -1,0 +1,11 @@
+include ':app'
+include ':moonlight'
+
+// GNU make (ndk-build) cannot handle spaces in paths; when the repo lives
+// under a spaced path, point LD_MOONLIGHT_DIR at a space-free mirror of the
+// moonlight submodule (robocopy /MIR of src-tauri/gen/android/moonlight,
+// without .git). See docs/streaming.md.
+def moonlightOverride = System.getenv('LD_MOONLIGHT_DIR')
+project(':moonlight').projectDir = moonlightOverride \
+    ? new File(moonlightOverride) \
+    : new File(rootDir, '../src-tauri/gen/android/moonlight/app')

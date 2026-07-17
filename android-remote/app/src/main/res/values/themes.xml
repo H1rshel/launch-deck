@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.LaunchDeckRemote" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#04060B</item>
+        <item name="android:statusBarColor">#04060B</item>
+        <item name="android:navigationBarColor">#04060B</item>
+    </style>
+</resources>

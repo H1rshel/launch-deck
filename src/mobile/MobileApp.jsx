@@ -5,6 +5,7 @@ import { getDeviceId, getUserDevices, isDeviceOnline, getStreamSourceMap } from 
 import { sendCommand } from '../lib/streaming/commandBus'
 import { initDeepLinkHandler, recheckDeepLink } from '../services/deepLinkHandler'
 import { logAuth, getAuthTrace, AUTH_DEBUG_EVENT, loadDurableTrace } from '../lib/authDebug'
+import { isNativeShell, nativeStartStream, nativeCancelStream, onNativeEvent } from './nativeShell'
 import './mobile.css'
 
 // Launch Deck Remote — the slim streaming-only tablet experience.
@@ -234,6 +235,45 @@ export default function MobileApp() {
     })
   }, [games, sourceMap])
 
+  // ── v2 native shell: PIN relay + stream lifecycle events ──
+  useEffect(() => {
+    if (!isNativeShell()) return undefined
+    return onNativeEvent(async (ev) => {
+      if (ev.type === 'pair-pin') {
+        // Invisible pairing: engine generated the PIN — relay it to the host
+        // over the command bus; the host auto-approves. User sees nothing.
+        logAuth('native pair-pin', ev.host)
+        try {
+          const myId = await getDeviceId()
+          const host = navRefs.current.sourceMap
+            ? [...navRefs.current.sourceMap.values()].flat().find((h) => h.lanIp === ev.host)
+            : null
+          const targetDevice = host?.deviceId || navRefs.current.sheet?.source?.deviceId
+          if (targetDevice) {
+            sendCommand(user.id, myId, targetDevice, 'pair_request', {
+              pin: ev.pin,
+              clientName: 'Launch Deck Remote',
+            }, { timeoutMs: 90_000 }).catch((e) => logAuth('pin relay ERR', String(e?.message).slice(0, 50)))
+          } else {
+            logAuth('pin relay ERR', 'no target device for ' + ev.host)
+          }
+        } catch (e) {
+          logAuth('pin relay ERR', String(e?.message).slice(0, 50))
+        }
+      } else if (ev.type === 'stream-status') {
+        logAuth('native status', ev.step)
+      } else if (ev.type === 'stream-started') {
+        logAuth('native stream STARTED', ev.app)
+        setSheet(null)
+      } else if (ev.type === 'stream-error') {
+        logAuth('native stream ERR', String(ev.message).slice(0, 80))
+        setSheet(null)
+        showToast(ev.message || 'Stream failed', 'error')
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id])
+
   // ── Controller navigation: D-pad/left stick moves focus, A plays, B closes ──
   const [padFocus, setPadFocus] = useState(-1)
   const gridRef = useRef(null)
@@ -309,6 +349,12 @@ export default function MobileApp() {
           { timeoutMs: 45_000 },
         )
         logAuth('prepare ok', (prep.appName || '?') + ' @ ' + (prep.hostname || source.hostname))
+        if (isNativeShell()) {
+          // v2: headless engine — sheet stays until stream-started/error event
+          nativeStartStream(prep.lanIp || source.lanIp, prep.appName)
+          logAuth('native engine invoked')
+          return
+        }
         await invoke('launch_moonlight_stream', {
           pcName: prep.hostname || source.hostname,
           appName: prep.appName || null,
@@ -333,6 +379,11 @@ export default function MobileApp() {
             ? 'This game is not installed on any online PC'
             : 'None of your PCs are online with streaming enabled',
         )
+        return
+      }
+      if (isNativeShell()) {
+        // v2: engine is built in and pairing is invisible — straight to stream
+        startStream(game, source)
         return
       }
       let installed = false
@@ -431,7 +482,8 @@ export default function MobileApp() {
           </div>
         </div>
 
-        <p className="m-login__or">or</p>
+        {!isNativeShell() && <p className="m-login__or">or</p>}
+        {!isNativeShell() && (
         <button
           className="m-google-btn"
           onClick={() => {
@@ -448,6 +500,7 @@ export default function MobileApp() {
           </svg>
           <span>{signingIn ? 'Waiting for browser…' : 'Sign in with Google'}</span>
         </button>
+        )}
         {signingIn && (
           <button className="m-signout" onClick={() => _authBridge.setSigningIn?.(false)}>
             Cancel and try again
@@ -558,7 +611,15 @@ export default function MobileApp() {
       )}
 
       {sheet?.type === 'starting' && (
-        <div className="m-sheet-backdrop">
+        <div
+          className="m-sheet-backdrop"
+          onClick={() => {
+            if (isNativeShell()) {
+              nativeCancelStream()
+              setSheet(null)
+            }
+          }}
+        >
           <div className="m-sheet m-sheet--starting">
             <div className="m-spinner" />
             <h3>Starting {sheet.game.normalized_title || sheet.game.title}</h3>
