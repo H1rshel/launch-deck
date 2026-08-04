@@ -1,4 +1,5 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
+import { igdbQuery as runIgdbQuery } from '../_shared/igdb.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,18 +9,7 @@ const corsHeaders = {
 const IGDB_CLIENT_ID     = Deno.env.get('IGDB_CLIENT_ID')!
 const IGDB_CLIENT_SECRET = Deno.env.get('IGDB_CLIENT_SECRET')!
 
-async function getIgdbToken(): Promise<string> {
-  const res = await fetch(
-    `https://id.twitch.tv/oauth2/token` +
-    `?client_id=${IGDB_CLIENT_ID}` +
-    `&client_secret=${IGDB_CLIENT_SECRET}` +
-    `&grant_type=client_credentials`,
-    { method: 'POST' },
-  )
-  if (!res.ok) throw new Error(`Twitch token error ${res.status}: ${await res.text()}`)
-  const json = await res.json()
-  return json.access_token as string
-}
+const IGDB_CREDS = { clientId: IGDB_CLIENT_ID, clientSecret: IGDB_CLIENT_SECRET }
 
 function coverUrl(imageId: string | undefined): string | null {
   return imageId ? `https://images.igdb.com/igdb/image/upload/t_cover_big/${imageId}.jpg` : null
@@ -39,7 +29,6 @@ serve(async (req) => {
       })
     }
 
-    const token = await getIgdbToken()
     const nowSec = Math.floor(Date.now() / 1000)
 
     // Search IGDB — escape double quotes in the query
@@ -61,17 +50,11 @@ serve(async (req) => {
       limit ${limit};
     `
 
-    const igdbRes = await fetch('https://api.igdb.com/v4/games', {
-      method: 'POST',
-      headers: {
-        'Client-ID': IGDB_CLIENT_ID,
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'text/plain',
-      },
-      body: igdbQuery,
-    })
-    if (!igdbRes.ok) throw new Error(`IGDB search error ${igdbRes.status}: ${await igdbRes.text()}`)
-    const games = await igdbRes.json() as any[]
+    // Repeat searches for the same term (a user retyping, several users
+    // looking up the same game) are served from the shared cache; the query
+    // text carries no per-user or per-second component, so a hit returns
+    // byte-identical results to a miss.
+    const games = await runIgdbQuery(igdbQuery, IGDB_CREDS)
 
     // Map to clean result objects
     const results = games.map((g: any) => {

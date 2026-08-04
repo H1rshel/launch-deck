@@ -4,6 +4,8 @@ import {
   getDeletedGames,
   addGame,
   updateGame,
+  getAppMeta,
+  setAppMeta,
 } from './db'
 import { backfillConfirmedGames } from './executableCatalog'
 import { tasteProfileService } from './tasteProfileService'
@@ -47,9 +49,23 @@ function asStoredString(value) {
 }
 
 // ── Per-session write guards ──────────────────────────────────────────────────
-// Prevents EXE backfill from running on every sync cycle.
+// Prevents a second EXE backfill starting while the first is still in flight.
 // Keyed by `'${userId}:${operation}'`.
 const _postSyncDoneForSession = new Set()
+
+// Persisted across restarts in app_meta, so an unchanged exe list costs zero
+// network writes no matter how often the app is relaunched.
+const EXE_BACKFILL_HASH_KEY = 'exe_backfill_hash'
+
+/** FNV-1a — short stable digest, so app_meta stores 8 chars instead of a list. */
+function hashSignature(input) {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
 
 function buildCloudGamePayload(game, userId, includeUbisoftId = true) {
   const payload = {
@@ -430,6 +446,53 @@ function pickEarliestAddedAt(cg, localGame) {
   return undefined
 }
 
+// PostgREST puts the `in` list in the URL, so chunk it to stay well clear of
+// header/URL length limits on a large first-sync library.
+const CLOUD_FETCH_CHUNK = 100
+
+/**
+ * Resolve a cloud row to its local counterpart, mirroring getCloudGameId's
+ * id priority and then falling back to local id / title slug / normalized
+ * title. Extracted so the pre-fetch pass and the reconcile loop below cannot
+ * drift apart — they must agree on what "already exists locally" means.
+ */
+function findLocalMatch(cg, combinedLocalGames, localByNormTitle) {
+  let localGame = null
+
+  if (cg.game_id.startsWith('steam_')) {
+    const steamAppId = cg.game_id.replace('steam_', '')
+    localGame = combinedLocalGames.find(lg => String(lg.steam_app_id) === steamAppId)
+  } else if (cg.game_id.startsWith('gog_')) {
+    const gogId = cg.game_id.replace('gog_', '')
+    localGame = combinedLocalGames.find(lg => String(lg.gog_id) === gogId)
+  } else if (cg.game_id.startsWith('epic_')) {
+    const epicId = cg.game_id.replace('epic_', '')
+    localGame = combinedLocalGames.find(lg => String(lg.epic_id) === epicId)
+  } else if (cg.game_id.startsWith('ubisoft_')) {
+    const ubisoftId = cg.game_id.replace('ubisoft_', '')
+    localGame = combinedLocalGames.find(lg => String(lg.ubisoft_id) === ubisoftId)
+  }
+
+  // Fallback: match by local DB ID or normalized title slug
+  if (!localGame) {
+    localGame = combinedLocalGames.find(lg =>
+      lg.id === cg.game_id ||
+      (lg.normalized_title || lg.title).toLowerCase().replace(/[^a-z0-9]+/g, '-') === cg.game_id
+    )
+  }
+
+  // Fallback: match by normalized title to deduplicate cross-platform entries
+  // (e.g. a Ubisoft Connect cloud entry matching an existing PC-platform local game).
+  // Only for non-deleted entries — a deleted cloud duplicate must not propagate its
+  // deleted flag to the live canonical entry via the update path below.
+  if (!localGame && !cg.deleted) {
+    const cloudNormTitle = (cg.normalized_title || cg.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+    if (cloudNormTitle) localGame = localByNormTitle.get(cloudNormTitle)
+  }
+
+  return localGame || null
+}
+
 /**
  * Fetch all cloud changes and apply them locally if newer.
  */
@@ -440,9 +503,17 @@ export async function syncCloudToLocal(userId) {
 
   window.dispatchEvent(new CustomEvent('cloud-sync-start'))
   try {
-    const { data: cloudGames, error } = await supabase
+    // Two-step fetch instead of `select('*')`. The reconcile loop below only
+    // needs six narrow columns to DECIDE what to do with a row — the wide
+    // payload (covers, genres, developers, publishers, …) is only read on the
+    // branches that actually insert or update. In the steady state nothing has
+    // changed, so the second query is skipped entirely and each 5-minute cycle
+    // transfers a fingerprint instead of the whole library. At one user that's
+    // a nicety; at thousands of users on 5-minute timers it's the difference
+    // between a fingerprint scan and streaming every row of every library.
+    const { data: cloudIndex, error } = await supabase
     .from('games')
-    .select('*')
+    .select('game_id, updated_at, deleted, added_at, title, normalized_title')
     .eq('user_id', userId)
 
   if (error) {
@@ -463,41 +534,46 @@ export async function syncCloudToLocal(userId) {
     if (normTitle) localByNormTitle.set(normTitle, lg)
   }
 
-  for (const cg of cloudGames) {
-    // Find matching local game
-    // Reverse matching logic matching getCloudGameId priority
-    let localGame = null
-
-    if (cg.game_id.startsWith('steam_')) {
-      const steamAppId = cg.game_id.replace('steam_', '')
-      localGame = combinedLocalGames.find(lg => String(lg.steam_app_id) === steamAppId)
-    } else if (cg.game_id.startsWith('gog_')) {
-      const gogId = cg.game_id.replace('gog_', '')
-      localGame = combinedLocalGames.find(lg => String(lg.gog_id) === gogId)
-    } else if (cg.game_id.startsWith('epic_')) {
-      const epicId = cg.game_id.replace('epic_', '')
-      localGame = combinedLocalGames.find(lg => String(lg.epic_id) === epicId)
-    } else if (cg.game_id.startsWith('ubisoft_')) {
-      const ubisoftId = cg.game_id.replace('ubisoft_', '')
-      localGame = combinedLocalGames.find(lg => String(lg.ubisoft_id) === ubisoftId)
-    }
-
-    // Fallback: match by local DB ID or normalized title slug
+  // Decide up front which rows the reconcile loop will actually read the wide
+  // payload from — only the insert and cloud-is-newer branches do. Matching
+  // uses the same helper the loop uses, against the pre-loop local state.
+  // localByNormTitle only ever GAINS entries during the loop, so a row that
+  // matched here still matches there: this pass can over-estimate (harmless
+  // extra row in the fetch) but can never miss a row that needs full data.
+  const needsFullRow = []
+  for (const cg of cloudIndex) {
+    const localGame = findLocalMatch(cg, combinedLocalGames, localByNormTitle)
+    if (localGame && cg.deleted && getCloudGameId(localGame) !== cg.game_id) continue
     if (!localGame) {
-      localGame = combinedLocalGames.find(lg =>
-        lg.id === cg.game_id ||
-        (lg.normalized_title || lg.title).toLowerCase().replace(/[^a-z0-9]+/g, '-') === cg.game_id
-      )
+      if (!cg.deleted) needsFullRow.push(cg.game_id)
+      continue
     }
+    const cloudUpdated = new Date(cg.updated_at || new Date(0)).getTime()
+    const localUpdated = new Date(localGame.updated_at || new Date(0)).getTime()
+    if (cloudUpdated > localUpdated) needsFullRow.push(cg.game_id)
+  }
 
-    // Fallback: match by normalized title to deduplicate cross-platform entries
-    // (e.g. a Ubisoft Connect cloud entry matching an existing PC-platform local game).
-    // Only for non-deleted entries — a deleted cloud duplicate must not propagate its
-    // deleted flag to the live canonical entry via the update path below.
-    if (!localGame && !cg.deleted) {
-      const cloudNormTitle = (cg.normalized_title || cg.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
-      if (cloudNormTitle) localGame = localByNormTitle.get(cloudNormTitle)
+  const fullRowById = new Map()
+  for (let i = 0; i < needsFullRow.length; i += CLOUD_FETCH_CHUNK) {
+    const chunk = needsFullRow.slice(i, i + CLOUD_FETCH_CHUNK)
+    const { data: rows, error: fetchError } = await supabase
+      .from('games')
+      .select('*')
+      .eq('user_id', userId)
+      .in('game_id', chunk)
+    if (fetchError) {
+      console.error('syncCloudToLocal: Failed to fetch changed cloud games', fetchError)
+      return { added: 0 }
     }
+    for (const row of rows || []) fullRowById.set(row.game_id, row)
+  }
+
+  // Rows that need wide data carry it; the rest keep the fingerprint, which
+  // holds every column the remaining branches read.
+  const cloudGames = cloudIndex.map((cg) => fullRowById.get(cg.game_id) || cg)
+
+  for (const cg of cloudGames) {
+    const localGame = findLocalMatch(cg, combinedLocalGames, localByNormTitle)
 
     // A deleted cloud row only applies to a local game that CANONICALLY maps
     // to that game_id. The id-fallback above can match a live game by its
@@ -613,20 +689,40 @@ export async function syncCloudToLocal(userId) {
     }
   }
 
-  // ── Post-sync writes (once per session per user) ───────────────────────────
-  // user_game_executables backfill
+  // ── Post-sync writes ───────────────────────────────────────────────────────
+  // user_game_executables backfill. Gated on a persisted signature rather than
+  // a per-session flag: the exe list barely ever changes, but a session flag
+  // re-uploaded the whole list on every app launch. The signature covers
+  // exactly the fields backfillConfirmedGames sends, so any real change still
+  // pushes immediately; the marker is only advanced once the push succeeds.
   const installedGames = allLocalGames.filter(g => g.install_path && g.raw_file_name)
   const exeKey = `${userId}:exe_backfill`
-  if (_postSyncDoneForSession.has(exeKey)) {
-    console.debug('[cloudSync] EXE backfill skipped — already done this session')
-  } else if (installedGames.length === 0) {
+  const exeHash = installedGames.length
+    ? hashSignature(
+        installedGames
+          .map(g => `${g.id} ${g.install_path} ${g.raw_file_name} ${g.title} ${g.platform || ''}`)
+          .sort()
+          .join(''),
+      )
+    : ''
+  const lastExeHash = await getAppMeta(EXE_BACKFILL_HASH_KEY)
+
+  if (installedGames.length === 0) {
     console.debug('[cloudSync] EXE backfill skipped — no installed games with exe paths')
+  } else if (exeHash === lastExeHash) {
+    console.debug('[cloudSync] EXE backfill skipped — exe list unchanged')
+  } else if (_postSyncDoneForSession.has(exeKey)) {
+    console.debug('[cloudSync] EXE backfill already in flight this session')
   } else {
     _postSyncDoneForSession.add(exeKey)
-    backfillConfirmedGames(userId, installedGames).catch(err => {
-      _postSyncDoneForSession.delete(exeKey) // allow retry on next sync if it failed
-      console.warn('[cloudSync] EXE backfill failed (non-fatal):', err?.message ?? err)
-    })
+    backfillConfirmedGames(userId, installedGames)
+      .then(() => setAppMeta(EXE_BACKFILL_HASH_KEY, exeHash))
+      .catch(err => {
+        console.warn('[cloudSync] EXE backfill failed (non-fatal):', err?.message ?? err)
+      })
+      .finally(() => {
+        _postSyncDoneForSession.delete(exeKey)
+      })
   }
 
   // Pull descriptions / chosen-metadata payloads for the library

@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.0'
+import { igdbQuery as cachedIgdbQuery, DEFAULT_TTL_MS as DISCOVER_TTL_MS } from '../_shared/igdb.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,39 +12,19 @@ const IGDB_CLIENT_SECRET = Deno.env.get('IGDB_CLIENT_SECRET')!
 
 const IGDB_FIELDS = 'id,name,slug,summary,category,first_release_date,cover.image_id,artworks.image_id,platforms.name,genres.name,themes.name,keywords.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name,franchises.name,hypes,rating,aggregated_rating,total_rating,total_rating_count'
 
-async function getIgdbToken(): Promise<string> {
-  const res = await fetch(
-    `https://id.twitch.tv/oauth2/token?client_id=${IGDB_CLIENT_ID}&client_secret=${IGDB_CLIENT_SECRET}&grant_type=client_credentials`,
-    { method: 'POST' }
-  )
-  if (!res.ok) throw new Error(`Twitch token error ${res.status}`)
-  const json = await res.json()
-  return json.access_token as string
-}
+const IGDB_CREDS = { clientId: IGDB_CLIENT_ID, clientSecret: IGDB_CLIENT_SECRET }
 
 function coverUrl(imageId: string | undefined): string | null {
   return imageId ? `https://images.igdb.com/igdb/image/upload/t_cover_big/${imageId}.jpg` : null
 }
 
-async function igdbQuery(apicalypse: string, token: string): Promise<any[]> {
-  const res = await fetch('https://api.igdb.com/v4/games', {
-    method: 'POST',
-    headers: {
-      'Client-ID': IGDB_CLIENT_ID,
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'text/plain',
-    },
-    body: apicalypse,
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`IGDB error ${res.status}: ${text}`)
-  }
-  const data = await res.json()
-  if (!Array.isArray(data)) {
-    throw new Error(`IGDB returned non-array: ${JSON.stringify(data)}`)
-  }
-  return data
+// These feed queries are byte-identical for every user — the personalisation
+// (owned-game filtering, taste-profile ranking) happens below on the result,
+// not in the query — so the upstream fetch is shared and deduplicated. See
+// ../_shared/igdb.ts. The token round-trip that used to precede every call
+// is gone with it.
+async function igdbQuery(apicalypse: string): Promise<any[]> {
+  return cachedIgdbQuery(apicalypse, IGDB_CREDS)
 }
 
 function mapGame(g: any): any {
@@ -166,15 +147,19 @@ serve(async (req) => {
       } catch (_) { /* ignore auth errors */ }
     }
 
-    const token = await getIgdbToken()
-    const nowSec = Math.floor(Date.now() / 1000)
+    // Quantised to the cache TTL. These timestamps go straight into the
+    // apicalypse text, so a raw per-second `now` would make every query
+    // string unique and the shared cache would never hit. Rounding down to a
+    // 10-minute boundary keeps the query stable across the window it is
+    // cached for — and "a game released in the last 10 minutes" is not a
+    // distinction any of these feeds can express anyway.
+    const nowSec = Math.floor(Date.now() / DISCOVER_TTL_MS) * (DISCOVER_TTL_MS / 1000)
     const PC_PLATFORMS = '(6, 14, 3)'
 
     // ── Top 100 ───────────────────────────────────────────────────────────────
     if (feed === 'top_100') {
       const raw = await igdbQuery(
         `fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & total_rating_count > 200; sort total_rating desc; limit ${page_size * 2}; offset ${(page - 1) * page_size * 2};`,
-        token
       )
       const filtered = raw.map(mapGame).filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
       const has_more = filtered.length > page_size || raw.length === page_size * 2
@@ -187,7 +172,6 @@ serve(async (req) => {
       const sixMonthsAgo = nowSec - 180 * 86400
       const raw = await igdbQuery(
         `fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & first_release_date >= ${sixMonthsAgo} & first_release_date <= ${nowSec} & total_rating_count > 5; sort total_rating_count desc; limit ${Math.min(page * page_size * 2 + 1, 500)}; offset 0;`,
-        token
       )
       const filtered = raw.map(mapGame).filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
       const start = (page - 1) * page_size
@@ -200,7 +184,6 @@ serve(async (req) => {
     if (feed === 'hidden_gems') {
       const raw = await igdbQuery(
         `fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & total_rating >= 78 & total_rating_count >= 5 & total_rating_count < 150; sort total_rating desc; limit ${page_size * 2 + 1}; offset ${(page - 1) * page_size * 2};`,
-        token
       )
       const filtered = raw.map(mapGame).filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
       const items = filtered.slice(0, page_size)
@@ -212,9 +195,9 @@ serve(async (req) => {
     if (feed === 'for_you') {
       const [popularRaw, recentRaw] = await Promise.all([
         // Grab the 400 most widely-played games to give the algorithm a huge, high-quality pool
-        igdbQuery(`fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & total_rating_count > 200; sort total_rating_count desc; limit 400;`, token),
+        igdbQuery(`fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & total_rating_count > 200; sort total_rating_count desc; limit 400;`),
         // Grab the 100 most widely-played recent games (last 12 months)
-        igdbQuery(`fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & first_release_date >= ${nowSec - 365 * 86400} & first_release_date <= ${nowSec} & total_rating_count > 10; sort total_rating_count desc; limit 100;`, token),
+        igdbQuery(`fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & first_release_date >= ${nowSec - 365 * 86400} & first_release_date <= ${nowSec} & total_rating_count > 10; sort total_rating_count desc; limit 100;`),
       ])
 
       const seen = new Set<string>()

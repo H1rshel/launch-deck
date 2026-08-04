@@ -8,7 +8,17 @@ import { supabase } from '../supabase'
 // Realtime delivers in ~1s; the polls are the safety net and must still be
 // tight enough that pairing/stream-prep feels responsive without it.
 const POLL_INTERVAL_MS = 1500
+// The listener sweep is a safety net, not the delivery path. While the
+// Realtime channel is subscribed it only has to cover the rare missed
+// notification, so it runs slowly; it drops back to the tight interval the
+// moment the channel is not confirmed healthy. A permanent 5s sweep costs
+// ~17k Supabase requests per PC per day and was a top-three source of write
+// churn on the project's Disk IO budget for no responsiveness gain.
 const LISTENER_POLL_MS = 5000
+// Kept well under sendCommand's 45s timeout: even if the channel reports
+// SUBSCRIBED but silently drops a notification, the sweep still claims the
+// command in time.
+const LISTENER_IDLE_POLL_MS = 20000
 const COMMAND_MAX_AGE_MS = 5 * 60 * 1000
 
 /**
@@ -174,6 +184,8 @@ export function startCommandListener(userId, deviceId, handlers) {
     }
   }
 
+  let realtimeHealthy = false
+
   const channel = supabase
     .channel(`device-commands-${deviceId}`)
     .on(
@@ -188,11 +200,22 @@ export function startCommandListener(userId, deviceId, handlers) {
         if (change.new?.user_id === userId) processCommand(change.new)
       },
     )
-    .subscribe()
+    .subscribe((status) => {
+      realtimeHealthy = status === 'SUBSCRIBED'
+    })
 
-  // Startup sweep (commands that arrived while offline) + slow poll fallback.
+  // Startup sweep (commands that arrived while offline) + poll fallback whose
+  // cadence follows the health of the Realtime channel above.
+  let pollTimer = null
+  const scheduleSweep = () => {
+    if (stopped) return
+    pollTimer = setTimeout(async () => {
+      await sweep()
+      scheduleSweep()
+    }, realtimeHealthy ? LISTENER_IDLE_POLL_MS : LISTENER_POLL_MS)
+  }
   sweep()
-  const pollTimer = setInterval(sweep, LISTENER_POLL_MS)
+  scheduleSweep()
 
   // Opportunistic cleanup of stale finished rows (once per session).
   supabase
@@ -204,7 +227,7 @@ export function startCommandListener(userId, deviceId, handlers) {
 
   return () => {
     stopped = true
-    clearInterval(pollTimer)
+    if (pollTimer) clearTimeout(pollTimer)
     supabase.removeChannel(channel)
   }
 }

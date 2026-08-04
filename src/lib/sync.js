@@ -290,12 +290,20 @@ export async function syncLibrary({ onProgress } = {}) {
 
         const existingByApp = dbBySteamId.get(appIdStr)
         if (existingByApp?.id && og.playtimeMinutes > 0) {
-          const ptUpdates = { imported_playtime_minutes: og.playtimeMinutes }
+          const ptUpdates = {}
+          // Steam reports the same total on every poll — writing it back
+          // unchanged bumps updated_at and makes the cloud push treat the
+          // whole owned library as dirty every sync cycle.
+          if ((existingByApp.imported_playtime_minutes || 0) !== og.playtimeMinutes) {
+            ptUpdates.imported_playtime_minutes = og.playtimeMinutes
+          }
           if (!existingByApp.lastPlayed && og.lastPlayed > 0) {
             ptUpdates.last_played = new Date(og.lastPlayed * 1000).toISOString()
           }
-          await updateGame(existingByApp.id, ptUpdates)
-          mergeIndexedGame(existingByApp, ptUpdates)
+          if (Object.keys(ptUpdates).length > 0) {
+            await updateGame(existingByApp.id, ptUpdates)
+            mergeIndexedGame(existingByApp, ptUpdates)
+          }
         }
 
         if (steamAppIds.has(appIdStr)) continue

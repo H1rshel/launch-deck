@@ -490,6 +490,37 @@ async function tauriUpdate(id, updates) {
   ])
 }
 
+async function getGameRow(id) {
+  if (isTauri) {
+    await ensureTablesExist()
+    const conn = await getDb()
+    const rows = await conn.select("SELECT * FROM games WHERE id = $1 LIMIT 1", [id])
+    return rows?.[0] || null
+  }
+  return getMemoryStore().find((g) => g.id === id) || null
+}
+
+/**
+ * SQLite column affinity means the same value comes back in different shapes
+ * (INTEGER 0 vs "0", REAL 1731334260.0 vs its TEXT form, '' vs NULL). Treat
+ * those as equal so a rewrite of identical data isn't mistaken for a change.
+ * Numeric coercion only applies when one side really is a JS number — string
+ * columns must compare as strings, or a title like "007" would equal "7".
+ */
+function sameStoredValue(a, b) {
+  if (a === b) return true
+  const aEmpty = a === null || a === undefined || a === ""
+  const bEmpty = b === null || b === undefined || b === ""
+  if (aEmpty || bEmpty) return aEmpty && bEmpty
+  if (typeof a === "boolean" || typeof b === "boolean") return Number(a) === Number(b)
+  if (typeof a === "number" || typeof b === "number") {
+    const na = Number(a)
+    const nb = Number(b)
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na === nb
+  }
+  return String(a) === String(b)
+}
+
 async function tauriRemove(id) {
   await ensureTablesExist()
   const conn = await getDb()
@@ -722,16 +753,44 @@ export async function addGame({
   return enrichGame(game)
 }
 
+/**
+ * Write a partial update, skipping fields whose value is already stored.
+ *
+ * The no-op guard is what keeps cloud sync cheap: `updated_at` is the LWW key
+ * the cloud push compares against, so a write that changes nothing but still
+ * bumps the timestamp makes syncLocalToCloud treat the row as dirty and
+ * re-upload it. Background passes (the Steam playtime refresh, enrichment,
+ * install-state checks) run every few minutes over the whole library, so an
+ * unguarded rewrite pushed every game to Supabase on every cycle — that alone
+ * produced ~370k row updates on a 193-row table and half of the project's
+ * total WAL volume, which is what depletes the Disk IO budget.
+ *
+ * A caller that passes an explicit `updated_at` is deliberately steering LWW
+ * state (the sync paths do this) and is written through untouched.
+ */
 export async function updateGame(id, updates) {
+  let changes = updates
+
   if (!updates.updated_at) {
-    updates.updated_at = new Date().toISOString()
+    const current = await getGameRow(id)
+    if (current) {
+      changes = {}
+      for (const [key, value] of Object.entries(updates)) {
+        if (!sameStoredValue(current[key], value)) changes[key] = value
+      }
+      if (Object.keys(changes).length === 0) return
+    } else {
+      changes = { ...updates }
+    }
+    changes.updated_at = new Date().toISOString()
   }
+
   if (isTauri) {
-    await tauriUpdate(id, updates)
+    await tauriUpdate(id, changes)
   } else {
     const store = getMemoryStore()
     const idx = store.findIndex((g) => g.id === id)
-    if (idx !== -1) Object.assign(store[idx], updates)
+    if (idx !== -1) Object.assign(store[idx], changes)
   }
 }
 
