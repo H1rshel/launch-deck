@@ -311,6 +311,26 @@ export function updateFeedCachesOnFollow(userId, diff, game = null) {
 }
 
 /**
+ * Every distinct game currently listed by a cached "following" page,
+ * deduplicated by source key. Lets the library/Following cleanup see entries
+ * that are still on screen even though their row is already gone from
+ * user_followed_games — which is the state a removal performed in an earlier
+ * session (or on another PC) leaves this client in.
+ */
+export function getCachedFollowingItems(userId) {
+  const prefix = (userId || "anon") + "|";
+  const byKey = new Map();
+  for (const [k, v] of _feedCache) {
+    if (!k.startsWith(prefix) || !k.includes("|following|")) continue;
+    for (const item of v.items ?? []) {
+      const key = followedGameKey(item.source, item.source_game_id);
+      if (key && !byKey.has(key)) byKey.set(key, item);
+    }
+  }
+  return byKey;
+}
+
+/**
  * Drop cached "following" items that are no longer in the authoritative
  * followed set, and correct the counts that go with them.
  *

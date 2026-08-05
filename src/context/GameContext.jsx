@@ -51,10 +51,14 @@ import { classifyDeletionReason } from "../lib/executableNorm";
 import DeleteFeedbackModal from "../components/games/DeleteFeedbackModal";
 import LaunchConfirmModal from "../components/games/LaunchConfirmModal";
 import { supabase } from "../lib/supabase";
-import { preloadUpcomingFeeds, updateFeedCachesOnFollow } from "../hooks/useUpcomingGames";
+import {
+  preloadUpcomingFeeds,
+  updateFeedCachesOnFollow,
+  getCachedFollowingItems,
+} from "../hooks/useUpcomingGames";
 import { getGameImages } from "../utils/imageHandler";
 import { followBus } from "../lib/followBus";
-import { applyCachedFollowChange } from "../lib/followedGamesStore";
+import { applyCachedFollowChange, gameKey as followedGameKey } from "../lib/followedGamesStore";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -271,10 +275,34 @@ export function GameProvider({ children }) {
         }
       }
 
-      if (matches.length === 0) return [];
+      // Games the Following view is still showing whose follow row is already
+      // gone. The delete and the notification live in the same code path, so a
+      // removal performed in an earlier session or on another PC leaves this
+      // client with the entry still on screen and the user never told why it
+      // later disappears. Treat those as removals to announce here.
+      // Same key helper the cache uses, so the two sides can't disagree on
+      // casing or trimming.
+      const liveFollowKeys = new Set(
+        follows.map((follow) => followedGameKey(follow.source, follow.source_game_id)),
+      );
+      const orphanGames = [];
+      for (const [key, item] of getCachedFollowingItems(user.id)) {
+        if (liveFollowKeys.has(key)) continue;
+        let libraryGame = null;
+        for (const titleKey of getFollowTitleKeys({ metadata: item }, item)) {
+          libraryGame = gameKeyToGame.get(titleKey);
+          if (libraryGame) break;
+        }
+        if (!libraryGame) continue;
+        orphanGames.push({ item, libraryGame });
+      }
+
+      if (matches.length === 0 && orphanGames.length === 0) return [];
 
       const followIds = matches.map((match) => match.follow.id);
-      const { error: deleteErr } = await supabase
+      const { error: deleteErr } = followIds.length === 0
+        ? { error: null }
+        : await supabase
         .from("user_followed_games")
         .delete()
         .eq("user_id", user.id)
@@ -297,9 +325,17 @@ export function GameProvider({ children }) {
       }
       followBus.emit();
 
+      // Prune the orphans from the cached Following pages too, so this only
+      // announces them once.
+      for (const { item } of orphanGames) {
+        updateFeedCachesOnFollow(user.id, -1, item);
+        applyCachedFollowChange(user.id, item.source, item.source_game_id, false);
+      }
+      if (orphanGames.length > 0) followBus.emit();
+
       const matchedGames = [];
       const seenGameIds = new Set();
-      for (const match of matches) {
+      for (const match of [...matches, ...orphanGames.map((o) => ({ libraryGame: o.libraryGame, follow: { source: o.item.source, source_game_id: o.item.source_game_id } }))]) {
         const game = match.libraryGame;
         const id = game?.id || `${match.follow.source}:${match.follow.source_game_id}`;
         if (seenGameIds.has(id)) continue;
