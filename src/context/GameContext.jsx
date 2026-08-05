@@ -211,10 +211,19 @@ export function GameProvider({ children }) {
       const cacheByKey = new Map();
       const ids = follows.map((follow) => String(follow.source_game_id)).filter(Boolean);
       if (ids.length > 0) {
-        const { data: cachedGames } = await supabase
+        // `title` is NOT a column on upcoming_games_cache — asking for it made
+        // PostgREST reject the whole request with 42703 every time, so this
+        // lookup silently returned nothing and no follow could ever be matched
+        // by its cached name. It fell back to an extra edge-function call on
+        // every startup to recover the titles.
+        const { data: cachedGames, error: cacheErr } = await supabase
           .from("upcoming_games_cache")
-          .select("source, source_game_id, name, title, cover_url")
+          .select("source, source_game_id, name, cover_url")
           .in("source_game_id", ids);
+
+        if (cacheErr) {
+          console.warn("Could not load cached titles for library cleanup:", cacheErr.message);
+        }
 
         for (const cacheGame of cachedGames ?? []) {
           cacheByKey.set(`${cacheGame.source}:${String(cacheGame.source_game_id)}`, cacheGame);

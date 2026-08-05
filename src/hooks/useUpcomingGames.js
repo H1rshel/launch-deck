@@ -181,9 +181,16 @@ function _accumulateFromCache(userId, feed, timeframe, page, date_from, date_to,
 
 /** Bust the Following feed cache only (used when the feed list needs refreshing). */
 export function bustFollowingFeedCache() {
+  let mutated = false;
   for (const [k] of _feedCache) {
-    if (k.includes("|following|")) _feedCache.delete(k);
+    if (k.includes("|following|")) {
+      _feedCache.delete(k);
+      mutated = true;
+    }
   }
+  // Must reach the persisted copy too, or the busted entries come straight
+  // back from disk on the next launch.
+  if (mutated) _persistCache();
 }
 
 /**
@@ -194,9 +201,14 @@ export function bustFollowingFeedCache() {
  */
 export function bustAllUserFeedCache(userId) {
   const prefix = (userId || "anon") + "|";
+  let mutated = false;
   for (const [k] of _feedCache) {
-    if (k.startsWith(prefix)) _feedCache.delete(k);
+    if (k.startsWith(prefix)) {
+      _feedCache.delete(k);
+      mutated = true;
+    }
   }
+  if (mutated) _persistCache();
 }
 
 function _byReleaseDateAsc(a, b) {
@@ -219,6 +231,12 @@ export function updateFeedCachesOnFollow(userId, diff, game = null) {
   const prefix = (userId || "anon") + "|";
   const gameId = game ? followedGameKey(game.source, game.source_game_id) : null;
   let foundFollowingEntry = false;
+  // Every branch below mutates _feedCache directly rather than through
+  // _setCache, so nothing here used to reach the persisted copy. That was
+  // invisible while persistence was broken; now that the cache is durable, an
+  // unfollow that isn't written through would be resurrected from disk on the
+  // next launch and linger for the whole 24h TTL.
+  let mutated = false;
 
   for (const [k, v] of _feedCache) {
     if (!k.startsWith(prefix)) continue;
@@ -236,7 +254,7 @@ export function updateFeedCachesOnFollow(userId, diff, game = null) {
           const newFacets = v.facets
             ? { ...v.facets, following_count: Math.max(0, (v.facets.following_count ?? 0) + 1) }
             : v.facets;
-          _feedCache.set(k, { ...v, items: newItems, meta: newMeta, facets: newFacets });
+          (mutated = true), _feedCache.set(k, { ...v, items: newItems, meta: newMeta, facets: newFacets });
         }
       } else if (game && diff < 0) {
         // Optimistically remove the game from every cached following page
@@ -247,13 +265,13 @@ export function updateFeedCachesOnFollow(userId, diff, game = null) {
         const newFacets = v.facets
           ? { ...v.facets, following_count: Math.max(0, (v.facets.following_count ?? 0) - 1) }
           : v.facets;
-        _feedCache.set(k, { ...v, items: newItems, meta: newMeta, facets: newFacets });
+        (mutated = true), _feedCache.set(k, { ...v, items: newItems, meta: newMeta, facets: newFacets });
       } else {
         // No game info available — delete to force a fresh API fetch
-        _feedCache.delete(k);
+        (mutated = true), _feedCache.delete(k);
       }
     } else if (v.facets) {
-      _feedCache.set(k, {
+      (mutated = true), _feedCache.set(k, {
         ...v,
         facets: {
           ...v.facets,
@@ -286,7 +304,60 @@ export function updateFeedCachesOnFollow(userId, diff, game = null) {
       meta: { total_count: 1, has_more: true },
       facets,
     });
+  } else if (mutated) {
+    // _setCache already persists; the direct mutations above do not.
+    _persistCache();
   }
+}
+
+/**
+ * Drop cached "following" items that are no longer in the authoritative
+ * followed set, and correct the counts that go with them.
+ *
+ * Self-heals the case this was written for: a game added to the library is
+ * removed from user_followed_games server-side, but a cached Following page
+ * still lists it — which is what left Crimson Desert showing under Following
+ * (and the badge reading 8) after the row had already been deleted.
+ */
+export function reconcileFollowingCache(userId, followedSet) {
+  if (!userId || !(followedSet instanceof Set)) return 0;
+  const prefix = userId + "|";
+  let removed = 0;
+  let mutated = false;
+
+  for (const [k, v] of _feedCache) {
+    if (!k.startsWith(prefix) || !k.includes("|following|")) continue;
+    if (!Array.isArray(v.items)) continue;
+
+    const kept = v.items.filter((g) =>
+      followedSet.has(followedGameKey(g.source, g.source_game_id)),
+    );
+    if (kept.length === v.items.length) continue;
+
+    removed += v.items.length - kept.length;
+    mutated = true;
+    _feedCache.set(k, {
+      ...v,
+      items: kept,
+      meta: { ...v.meta, total_count: followedSet.size },
+      facets: v.facets ? { ...v.facets, following_count: followedSet.size } : v.facets,
+    });
+  }
+
+  // The following_count facet is mirrored onto every other feed's cached
+  // response, so those go stale too.
+  if (mutated) {
+    for (const [k, v] of _feedCache) {
+      if (!k.startsWith(prefix) || k.includes("|following|") || !v.facets) continue;
+      if (v.facets.following_count === followedSet.size) continue;
+      _feedCache.set(k, {
+        ...v,
+        facets: { ...v.facets, following_count: followedSet.size },
+      });
+    }
+    _persistCache();
+  }
+  return removed;
 }
 
 const TIMEFRAME_MAP = {
@@ -378,13 +449,16 @@ export async function preloadUpcomingFeeds(userId, activeFeed = "for_you") {
   // though SQLite still had it.
   await _hydrateFromSqlite();
 
+  // Awaiting the followed set here also means first paint already knows which
+  // cards should render with followed styling. Reconcile before trusting the
+  // cache: a game added to the library gets unfollowed server-side, and a
+  // cached Following page would otherwise keep listing it until the TTL ran out.
+  reconcileFollowingCache(userId, await followedSetPromise);
+
   const allCached = ALL_FEEDS.every((f) =>
     _getCached(_cacheKey(userId, f, timeframe, 1, undefined, undefined, sort)),
   );
-  if (allCached) {
-    await followedSetPromise;
-    return;
-  }
+  if (allCached) return;
 
   const bulkOk = await _preloadAllFeeds(userId, timeframe, sort);
   if (!bulkOk) {
@@ -394,10 +468,6 @@ export async function preloadUpcomingFeeds(userId, activeFeed = "for_you") {
     }
     await _preloadFeed(activeFeed);
   }
-
-  // The followed-set cache is awaited either way so first paint already knows
-  // which cards should render with followed styling.
-  await followedSetPromise;
 }
 
 /**
