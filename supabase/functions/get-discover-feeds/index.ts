@@ -48,16 +48,35 @@ function coverUrl(imageId: string | undefined): string | null {
   return imageId ? `https://images.igdb.com/igdb/image/upload/t_cover_big/${imageId}.jpg` : null
 }
 
+// Bumped whenever the SHAPE of a cached payload changes, so entries written
+// by an older deploy can never be read back under the new interpretation.
+// v1 stored raw IGDB objects; v2 stores mapGame output.
+const CACHE_SHAPE_VERSION = 'v2'
+
 async function hashQuery(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${CACHE_SHAPE_VERSION}\n${text}`),
+  )
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 }
 
-/** Runs the query upstream and writes the result back to the shared cache. */
+/**
+ * Runs the query upstream and writes the result back to the shared cache.
+ *
+ * Stores mapGame's OUTPUT, not the raw IGDB response. mapGame is 1:1 and
+ * drops everything the feeds never look at — the nested involved_companies
+ * objects, artworks, category, the id/name pairs inside every platform,
+ * genre, theme and keyword. The raw for_you pool was 1.6 MB of JSON to read
+ * and parse on every request; this is the single biggest lever on warm
+ * latency, and it also means the mapping runs once per hour instead of once
+ * per request. Responses are unchanged — the same objects come out either way.
+ */
 async function fetchAndStore(apicalypse: string, hash: string): Promise<any[]> {
-  const data = await cachedIgdbQuery(apicalypse, IGDB_CREDS, { ttlMs: 0 })
+  const raw = await cachedIgdbQuery(apicalypse, IGDB_CREDS, { ttlMs: 0 })
+  const data = raw.map(mapGame)
   if (cacheDb) {
     const now = Date.now()
     const { error } = await cacheDb.from('discover_cache').upsert(
@@ -75,8 +94,14 @@ async function fetchAndStore(apicalypse: string, hash: string): Promise<any[]> {
   return data
 }
 
+/** Uncached upstream path — the exact behaviour this function had before. */
+async function fetchDirect(apicalypse: string): Promise<any[]> {
+  const raw = await cachedIgdbQuery(apicalypse, IGDB_CREDS)
+  return raw.map(mapGame)
+}
+
 /**
- * Cache-first IGDB query.
+ * Cache-first fetch of a feed's games, already mapped.
  *
  * Fresh entry  → served from Postgres, no upstream call.
  * Stale entry  → served immediately AND refreshed in the background, so a
@@ -87,14 +112,14 @@ async function fetchAndStore(apicalypse: string, hash: string): Promise<any[]> {
  * Every failure path falls through to a direct IGDB call, so the feed keeps
  * working exactly as it does today if the cache is unavailable.
  */
-async function igdbQuery(apicalypse: string): Promise<any[]> {
-  if (!cacheDb) return cachedIgdbQuery(apicalypse, IGDB_CREDS)
+async function fetchGames(apicalypse: string): Promise<any[]> {
+  if (!cacheDb) return fetchDirect(apicalypse)
 
   let hash: string
   try {
     hash = await hashQuery(apicalypse)
   } catch {
-    return cachedIgdbQuery(apicalypse, IGDB_CREDS)
+    return fetchDirect(apicalypse)
   }
 
   try {
@@ -124,7 +149,7 @@ async function igdbQuery(apicalypse: string): Promise<any[]> {
     }
   } catch (err: any) {
     console.warn('[discover-cache] lookup failed:', err?.message ?? err)
-    return cachedIgdbQuery(apicalypse, IGDB_CREDS)
+    return fetchDirect(apicalypse)
   }
 
   return fetchAndStore(apicalypse, hash)
@@ -261,10 +286,10 @@ serve(async (req) => {
 
     // ── Top 100 ───────────────────────────────────────────────────────────────
     if (feed === 'top_100') {
-      const raw = await igdbQuery(
+      const raw = await fetchGames(
         `fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & total_rating_count > 200; sort total_rating desc; limit ${page_size * 2}; offset ${(page - 1) * page_size * 2};`,
       )
-      const filtered = raw.map(mapGame).filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
+      const filtered = raw.filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
       const has_more = filtered.length > page_size || raw.length === page_size * 2
       const items = filtered.slice(0, page_size)
       return reply({ items, meta: { total_count: 100, page, page_size, has_more } })
@@ -273,10 +298,10 @@ serve(async (req) => {
     // ── Trending ──────────────────────────────────────────────────────────────
     if (feed === 'trending') {
       const sixMonthsAgo = nowSec - 180 * 86400
-      const raw = await igdbQuery(
+      const raw = await fetchGames(
         `fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & first_release_date >= ${sixMonthsAgo} & first_release_date <= ${nowSec} & total_rating_count > 5; sort total_rating_count desc; limit ${Math.min(page * page_size * 2 + 1, 500)}; offset 0;`,
       )
-      const filtered = raw.map(mapGame).filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
+      const filtered = raw.filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
       const start = (page - 1) * page_size
       const items = filtered.slice(start, start + page_size)
       const has_more = start + page_size < filtered.length || raw.length === Math.min(page * page_size * 2 + 1, 500)
@@ -285,10 +310,10 @@ serve(async (req) => {
 
     // ── Hidden Gems ───────────────────────────────────────────────────────────
     if (feed === 'hidden_gems') {
-      const raw = await igdbQuery(
+      const raw = await fetchGames(
         `fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & total_rating >= 78 & total_rating_count >= 5 & total_rating_count < 150; sort total_rating desc; limit ${page_size * 2 + 1}; offset ${(page - 1) * page_size * 2};`,
       )
-      const filtered = raw.map(mapGame).filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
+      const filtered = raw.filter((g: any) => !ownedGameNames.has(normalizeName(g.name)))
       const items = filtered.slice(0, page_size)
       const has_more = items.length === page_size && raw.length > page_size * 2
       return reply({ items, meta: { total_count: null, page, page_size, has_more } })
@@ -298,13 +323,13 @@ serve(async (req) => {
     if (feed === 'for_you') {
       const [popularRaw, recentRaw] = await Promise.all([
         // Grab the 400 most widely-played games to give the algorithm a huge, high-quality pool
-        igdbQuery(`fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & total_rating_count > 200; sort total_rating_count desc; limit 400;`),
+        fetchGames(`fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & total_rating_count > 200; sort total_rating_count desc; limit 400;`),
         // Grab the 100 most widely-played recent games (last 12 months)
-        igdbQuery(`fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & first_release_date >= ${nowSec - 365 * 86400} & first_release_date <= ${nowSec} & total_rating_count > 10; sort total_rating_count desc; limit 100;`),
+        fetchGames(`fields ${IGDB_FIELDS}; where platforms = ${PC_PLATFORMS} & first_release_date >= ${nowSec - 365 * 86400} & first_release_date <= ${nowSec} & total_rating_count > 10; sort total_rating_count desc; limit 100;`),
       ])
 
       const seen = new Set<string>()
-      let pool = [...popularRaw, ...recentRaw].map(mapGame).filter((g: any) => {
+      let pool = [...popularRaw, ...recentRaw].filter((g: any) => {
         if (seen.has(g.source_game_id) || ownedGameNames.has(normalizeName(g.name))) return false
         seen.add(g.source_game_id)
         return true
