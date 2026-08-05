@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { followBus } from "../lib/followBus";
+import { getAppMeta, setAppMeta } from "../lib/db";
 import {
   applyCachedFollowChange,
   gameKey as followedGameKey,
@@ -53,18 +54,82 @@ try {
   /* corrupt cache — ignore */
 }
 
+// ── Durable persistence (SQLite app_meta) ────────────────────────────────────
+// localStorage alone proved unreliable here: an inspection of the WebView2
+// store found none of this module's `ld_*` keys present at all — not even the
+// tiny last-user-id — while other keys written by the app were there. Whatever
+// the cause, this is the same class of problem that moved device identity out
+// of localStorage and into app_meta, so the cache now lives in both places:
+// localStorage stays as the SYNCHRONOUS fast path (it lets the row hydrate
+// during the very first render), and SQLite is the durable copy behind it.
+const _SQLITE_KEY = "upcoming_feed_cache_v1";
+const _LAST_USER_SQLITE_KEY = "upcoming_last_user_id";
+
+function _warnPersist(what, err) {
+  // Every failure here used to be swallowed by an empty catch, which is
+  // exactly why a cache that never persisted went unnoticed.
+  console.warn(`[useUpcomingFeeds] ${what}:`, err?.message ?? err);
+}
+
+function _mergeIntoCache(obj) {
+  const now = Date.now();
+  for (const [k, v] of Object.entries(obj || {})) {
+    // A copy already in memory is at least as fresh as a stored one.
+    if (_feedCache.has(k)) continue;
+    const feedInKey = k.split("|")[1];
+    const ttl = feedInKey === "recent" ? RECENT_CACHE_TTL_MS : CACHE_TTL_MS;
+    if (v && typeof v.ts === "number" && now - v.ts <= ttl) _feedCache.set(k, v);
+  }
+}
+
+let _sqliteHydration = null;
+/** Merge the durable copy in. Idempotent; callers await before fetching. */
+function _hydrateFromSqlite() {
+  if (!_sqliteHydration) {
+    _sqliteHydration = (async () => {
+      try {
+        const [raw, lastUser] = await Promise.all([
+          getAppMeta(_SQLITE_KEY),
+          getAppMeta(_LAST_USER_SQLITE_KEY),
+        ]);
+        if (raw) _mergeIntoCache(JSON.parse(raw));
+        // Cache keys are user-scoped, so a restored cache is useless without
+        // the id that keys it.
+        if (!_preloadedUserId && lastUser) _preloadedUserId = lastUser;
+      } catch (err) {
+        _warnPersist("SQLite cache hydrate failed", err);
+      }
+    })();
+  }
+  return _sqliteHydration;
+}
+
 let _persistTimer = null;
 function _persistCache() {
   if (_persistTimer) return;
   _persistTimer = setTimeout(() => {
     _persistTimer = null;
+    const obj = {};
+    for (const [k, v] of _feedCache) obj[k] = v;
+
+    let json;
     try {
-      const obj = {};
-      for (const [k, v] of _feedCache) obj[k] = v;
-      localStorage.setItem(_PERSIST_KEY, JSON.stringify(obj));
-    } catch {
-      /* quota or serialization error — non-fatal */
+      json = JSON.stringify(obj);
+    } catch (err) {
+      _warnPersist("cache serialization failed", err);
+      return;
     }
+
+    try {
+      localStorage.setItem(_PERSIST_KEY, json);
+    } catch (err) {
+      // Quota is the likely one; the SQLite write below has no such limit.
+      _warnPersist("localStorage cache write failed", err);
+    }
+
+    setAppMeta(_SQLITE_KEY, json).catch((err) =>
+      _warnPersist("SQLite cache write failed", err),
+    );
   }, 500);
 }
 
@@ -248,9 +313,15 @@ export async function preloadUpcomingFeeds(userId, activeFeed = "for_you") {
   _preloadedUserId = userId;
   try {
     localStorage.setItem(_LAST_USER_KEY, userId);
-  } catch {
-    /* ignore */
+  } catch (err) {
+    _warnPersist("last-user-id write failed", err);
   }
+  // Durable mirror, for the same reason as the feed cache above: the sync
+  // localStorage read at module load is what lets the very first render look
+  // up cached data before useAuth() resolves, but it can't be relied on alone.
+  setAppMeta(_LAST_USER_SQLITE_KEY, userId).catch((err) =>
+    _warnPersist("last-user-id SQLite write failed", err),
+  );
   const followedSetPromise = loadFollowedSet(userId).catch(() => new Set());
 
   const savedPeriod = sessionStorage.getItem("upcoming_period") || "all";
@@ -290,16 +361,93 @@ export async function preloadUpcomingFeeds(userId, activeFeed = "for_you") {
     return promise;
   }
 
-  // Start all remaining feeds in parallel immediately — no delay so dashboard
-  // tab switches are cache-hits from the first user interaction onward.
-  const remainingFeeds = ALL_FEEDS.filter(f => f !== activeFeed);
-  if (remainingFeeds.length > 0) {
-    Promise.all(remainingFeeds.map(_preloadFeed)).catch(() => {});
+  // One request for every feed, instead of one request PER feed.
+  //
+  // The edge function has always supported `feed: 'preload'`, which builds all
+  // the standard feeds from a single pass over the candidate pool — but this
+  // client never called it. It fired six separate invocations, and each one
+  // independently re-fetched and re-scored the same ~2,700 rows. Six times the
+  // server work for the same result, with the six calls contending against
+  // each other, which is what made the dashboard's Upcoming row slow to
+  // populate on launch.
+  //
+  // Falls back to the per-feed path if the bulk call fails for any reason, so
+  // this can only ever be faster, never a new failure mode.
+  // Bring the durable copy in before deciding to hit the network — otherwise a
+  // launch where localStorage came back empty would refetch everything even
+  // though SQLite still had it.
+  await _hydrateFromSqlite();
+
+  const allCached = ALL_FEEDS.every((f) =>
+    _getCached(_cacheKey(userId, f, timeframe, 1, undefined, undefined, sort)),
+  );
+  if (allCached) {
+    await followedSetPromise;
+    return;
   }
 
-  // Await the active feed and followed-set cache so first paint already knows
+  const bulkOk = await _preloadAllFeeds(userId, timeframe, sort);
+  if (!bulkOk) {
+    const remainingFeeds = ALL_FEEDS.filter(f => f !== activeFeed);
+    if (remainingFeeds.length > 0) {
+      Promise.all(remainingFeeds.map(_preloadFeed)).catch(() => {});
+    }
+    await _preloadFeed(activeFeed);
+  }
+
+  // The followed-set cache is awaited either way so first paint already knows
   // which cards should render with followed styling.
-  await Promise.all([_preloadFeed(activeFeed), followedSetPromise]);
+  await followedSetPromise;
+}
+
+/**
+ * Fetch every standard feed in one `feed: 'preload'` call and seed the cache
+ * with each one. Returns false (without throwing) if anything goes wrong, so
+ * the caller can fall back to per-feed fetches.
+ */
+async function _preloadAllFeeds(userId, timeframe, sort) {
+  const bulkKey = _cacheKey(userId, "__preload__", timeframe, 1, undefined, undefined, sort);
+  if (_preloadInflight.has(bulkKey)) {
+    try {
+      return await _preloadInflight.get(bulkKey);
+    } catch {
+      return false;
+    }
+  }
+
+  const promise = (async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke("get-upcoming-feeds", {
+        body: { feed: "preload", timeframe, page: 1, page_size: 48, sort },
+      });
+      if (error || !data || data.error) return false;
+
+      let seeded = 0;
+      for (const feedName of ALL_FEEDS) {
+        const entry = data[feedName];
+        if (!entry || !Array.isArray(entry.items)) continue;
+        _setCache(_cacheKey(userId, feedName, timeframe, 1, undefined, undefined, sort), {
+          items: entry.items,
+          meta: entry.meta ?? {},
+          facets: entry.facets ?? null,
+        });
+        seeded++;
+        if (feedName === "following") {
+          mergeCachedFollowedGames(userId, entry.items);
+        }
+      }
+      return seeded > 0;
+    } catch (e) {
+      if (import.meta.env.DEV)
+        console.warn("[useUpcomingFeeds] bulk preload failed, falling back:", e);
+      return false;
+    } finally {
+      _preloadInflight.delete(bulkKey);
+    }
+  })();
+
+  _preloadInflight.set(bulkKey, promise);
+  return promise;
 }
 
 function applyFollowOverrides(baseSet, overrides) {
