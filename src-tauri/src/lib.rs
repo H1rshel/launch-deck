@@ -6404,8 +6404,15 @@ struct CheapSharkDeal {
 async fn fetch_cheapshark_deals(game_title: String) -> Result<Vec<CheapSharkDeal>, String> {
     let client = app_http_client();
     let encoded = urlencoding::encode(&game_title);
+    // Deliberately NOT sortBy=Price with a small page. CheapShark returns
+    // every product whose title matches, DLC included, so asking for the 12
+    // cheapest fills the window with add-ons and the base game never appears —
+    // the accuracy filter on the JS side then discards all of them and the
+    // game shows no prices at all. Elden Ring returned 12 rows of "NIGHTREIGN
+    // The Forsaken Hollows" DLC and zero usable deals. Take a wide page in
+    // CheapShark's own relevance order and sort by price on the client.
     let url = format!(
-        "https://www.cheapshark.com/api/1.0/deals?title={}&upperPrice=100&pageSize=12&sortBy=Price",
+        "https://www.cheapshark.com/api/1.0/deals?title={}&pageSize=60",
         encoded
     );
 
@@ -6492,6 +6499,62 @@ struct ItadResult {
     deals: Vec<ItadDeal>,
 }
 
+/// Lowercase, strip trademark marks, edition noise and punctuation so store
+/// titles ("Batman™: Arkham Knight", "RESIDENT EVIL 2 (2019)") compare against
+/// library titles on equal terms.
+fn itad_normalize_title(value: &str) -> String {
+    let lowered = value.to_lowercase().replace(['™', '®', '©'], " ");
+    let mut out = String::with_capacity(lowered.len());
+    let mut last_space = true;
+    for ch in lowered.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_space = false;
+        } else if !last_space {
+            out.push(' ');
+            last_space = true;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// How well an IsThereAnyDeal search hit matches the title we asked for.
+/// Higher is better; 0 means "not the same game, don't use it".
+fn itad_title_score(wanted: &str, candidate: &str) -> i32 {
+    let w = itad_normalize_title(wanted);
+    let c = itad_normalize_title(candidate);
+    if w.is_empty() || c.is_empty() {
+        return 0;
+    }
+    if w == c {
+        return 1000;
+    }
+
+    let w_tokens: Vec<&str> = w.split(' ').filter(|t| !t.is_empty()).collect();
+    let c_tokens: Vec<&str> = c.split(' ').filter(|t| !t.is_empty()).collect();
+    if w_tokens.is_empty() || c_tokens.is_empty() {
+        return 0;
+    }
+
+    // Every word we asked for is present — an edition/region suffix on the
+    // store side ("Shadow of the Tomb Raider - Definitive Edition") is a fine
+    // match, so this outranks partial overlap but not an exact hit.
+    let all_wanted_present = w_tokens.iter().all(|t| c_tokens.contains(t));
+    if all_wanted_present {
+        let extra = (c_tokens.len() - w_tokens.len()) as i32;
+        return 800 - extra.min(40) * 10;
+    }
+
+    let overlap = w_tokens.iter().filter(|t| c_tokens.contains(*t)).count() as f32;
+    let ratio = overlap / w_tokens.len().max(c_tokens.len()) as f32;
+    // Below this the titles merely share a franchise word or two — that is how
+    // "Shadow of War" ended up on "Shadow of Mordor".
+    if ratio < 0.75 {
+        return 0;
+    }
+    (ratio * 500.0) as i32
+}
+
 #[tauri::command]
 async fn fetch_itad_deals(game_title: String) -> Result<ItadResult, String> {
     dotenv().ok();
@@ -6502,8 +6565,13 @@ async fn fetch_itad_deals(game_title: String) -> Result<ItadResult, String> {
 
     // Step 1: Search for the game to get its ITAD game ID
     let encoded_title = urlencoding::encode(&game_title);
+    // Ask for several candidates rather than blindly trusting the top hit.
+    // With results=1, "Middle-earth: Shadow of War" resolved to "Shadow of
+    // Mordor" (wrong game, zero deals) and "AO Tennis 2" to "AO Tennis 2
+    // Tools" — a wrong match is worse than no match, because it silently
+    // shows prices for a different product instead of falling back.
     let search_url = format!(
-        "https://api.isthereanydeal.com/games/search/v1?title={}&key={}&results=1",
+        "https://api.isthereanydeal.com/games/search/v1?title={}&key={}&results=8",
         encoded_title, api_key
     );
 
@@ -6543,10 +6611,29 @@ async fn fetch_itad_deals(game_title: String) -> Result<ItadResult, String> {
             )
         })?;
 
-    let found = search_results
+    if search_results.is_empty() {
+        return Err("No matching game found on IsThereAnyDeal".to_string());
+    }
+
+    // Rank candidates by how well their title matches what we asked for, so a
+    // loosely-related entry can never outrank the real game just by being
+    // first. Anything below the threshold is treated as "no match" and lets
+    // the CheapShark fallback take over.
+    let mut ranked: Vec<(i32, ItadSearchItem)> = search_results
         .into_iter()
-        .next()
-        .ok_or_else(|| "No matching game found on IsThereAnyDeal".to_string())?;
+        .filter_map(|item| {
+            let candidate = item.title.clone().unwrap_or_default();
+            let score = itad_title_score(&game_title, &candidate);
+            if score > 0 { Some((score, item)) } else { None }
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+
+    if ranked.is_empty() {
+        return Err("No matching game found on IsThereAnyDeal".to_string());
+    }
+
+    let found = ranked.remove(0).1;
 
     let game_id = found.id;
     let game_slug = found.slug;

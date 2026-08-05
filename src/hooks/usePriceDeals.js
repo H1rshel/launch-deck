@@ -43,8 +43,10 @@ async function fetchCheapSharkDealsForTitle(gameTitle) {
   try {
     return await invoke('fetch_cheapshark_deals', { gameTitle })
   } catch (invokeError) {
+    // Must mirror the Rust query above — see the comment there for why
+    // sortBy=Price with a small page returns nothing usable.
     const encoded = encodeURIComponent(gameTitle)
-    const url = `https://www.cheapshark.com/api/1.0/deals?title=${encoded}&upperPrice=100&pageSize=12&sortBy=Price`
+    const url = `https://www.cheapshark.com/api/1.0/deals?title=${encoded}&pageSize=60`
     const res = await fetch(url)
     if (!res.ok) throw invokeError
 
