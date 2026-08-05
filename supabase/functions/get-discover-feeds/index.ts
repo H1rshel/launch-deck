@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.0'
-import { igdbQuery as cachedIgdbQuery, DEFAULT_TTL_MS as DISCOVER_TTL_MS } from '../_shared/igdb.ts'
+import { igdbQuery as cachedIgdbQuery } from '../_shared/igdb.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,17 +14,120 @@ const IGDB_FIELDS = 'id,name,slug,summary,category,first_release_date,cover.imag
 
 const IGDB_CREDS = { clientId: IGDB_CLIENT_ID, clientSecret: IGDB_CLIENT_SECRET }
 
+// ── Shared Discover cache ────────────────────────────────────────────────────
+// These feed queries are byte-identical for every user — the personalisation
+// (owned-game filtering, taste-profile ranking) happens below on the RESULT,
+// not in the query — so the upstream fetch can be shared by everyone.
+//
+// It has to be shared through Postgres, not memory: Edge Functions get a
+// fresh isolate per request, so the module-scope cache in ../_shared/igdb.ts
+// never survives between requests (measured: six concurrent identical
+// requests each paid the full ~2s IGDB round trip). That module is still the
+// fetch layer underneath — it just can't be the cache.
+//
+// One hour. IGDB's aggregate ratings and popularity counts move over days, so
+// an hour is imperceptible in these feeds, and it cuts upstream calls to at
+// most one per distinct query per hour no matter how many users are browsing.
+const CACHE_TTL_MS = 60 * 60 * 1000
+
+// Past this, an entry is too old to serve even as a stopgap and the request
+// waits for fresh data instead.
+const CACHE_MAX_STALE_MS = 24 * 60 * 60 * 1000
+
+const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+
+// Separate from the per-request user client below: the cache is server-owned
+// state and the table denies anon/authenticated entirely.
+const cacheDb = SERVICE_ROLE_KEY
+  ? createClient(Deno.env.get('SUPABASE_URL') ?? '', SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    })
+  : null
+
 function coverUrl(imageId: string | undefined): string | null {
   return imageId ? `https://images.igdb.com/igdb/image/upload/t_cover_big/${imageId}.jpg` : null
 }
 
-// These feed queries are byte-identical for every user — the personalisation
-// (owned-game filtering, taste-profile ranking) happens below on the result,
-// not in the query — so the upstream fetch is shared and deduplicated. See
-// ../_shared/igdb.ts. The token round-trip that used to precede every call
-// is gone with it.
+async function hashQuery(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/** Runs the query upstream and writes the result back to the shared cache. */
+async function fetchAndStore(apicalypse: string, hash: string): Promise<any[]> {
+  const data = await cachedIgdbQuery(apicalypse, IGDB_CREDS, { ttlMs: 0 })
+  if (cacheDb) {
+    const now = Date.now()
+    const { error } = await cacheDb.from('discover_cache').upsert(
+      {
+        query_hash: hash,
+        query_text: apicalypse,
+        payload: data,
+        refreshed_at: new Date(now).toISOString(),
+        expires_at: new Date(now + CACHE_TTL_MS).toISOString(),
+      },
+      { onConflict: 'query_hash' },
+    )
+    if (error) console.warn('[discover-cache] store failed:', error.message)
+  }
+  return data
+}
+
+/**
+ * Cache-first IGDB query.
+ *
+ * Fresh entry  → served from Postgres, no upstream call.
+ * Stale entry  → served immediately AND refreshed in the background, so a
+ *                user never waits on an expiry and a burst of requests at the
+ *                expiry boundary can't stampede IGDB.
+ * No entry     → fetched upstream and stored (the pre-cache behaviour).
+ *
+ * Every failure path falls through to a direct IGDB call, so the feed keeps
+ * working exactly as it does today if the cache is unavailable.
+ */
 async function igdbQuery(apicalypse: string): Promise<any[]> {
-  return cachedIgdbQuery(apicalypse, IGDB_CREDS)
+  if (!cacheDb) return cachedIgdbQuery(apicalypse, IGDB_CREDS)
+
+  let hash: string
+  try {
+    hash = await hashQuery(apicalypse)
+  } catch {
+    return cachedIgdbQuery(apicalypse, IGDB_CREDS)
+  }
+
+  try {
+    const { data: row } = await cacheDb
+      .from('discover_cache')
+      .select('payload, expires_at')
+      .eq('query_hash', hash)
+      .maybeSingle()
+
+    if (row && Array.isArray(row.payload)) {
+      const expiredFor = Date.now() - new Date(row.expires_at).getTime()
+      if (expiredFor < 0) return row.payload as any[]
+
+      if (expiredFor < CACHE_MAX_STALE_MS) {
+        // Serve stale, refresh behind the response. waitUntil keeps the
+        // isolate alive long enough for the write to land; without it the
+        // entry simply stays stale and the next request retries.
+        const refresh = fetchAndStore(apicalypse, hash).catch((err) =>
+          console.warn('[discover-cache] background refresh failed:', err?.message ?? err),
+        )
+        try {
+          // @ts-ignore — provided by the Supabase Edge Runtime
+          EdgeRuntime.waitUntil(refresh)
+        } catch { /* not available; fire-and-forget */ }
+        return row.payload as any[]
+      }
+    }
+  } catch (err: any) {
+    console.warn('[discover-cache] lookup failed:', err?.message ?? err)
+    return cachedIgdbQuery(apicalypse, IGDB_CREDS)
+  }
+
+  return fetchAndStore(apicalypse, hash)
 }
 
 function mapGame(g: any): any {
@@ -147,13 +250,13 @@ serve(async (req) => {
       } catch (_) { /* ignore auth errors */ }
     }
 
-    // Quantised to the cache TTL. These timestamps go straight into the
-    // apicalypse text, so a raw per-second `now` would make every query
-    // string unique and the shared cache would never hit. Rounding down to a
-    // 10-minute boundary keeps the query stable across the window it is
-    // cached for — and "a game released in the last 10 minutes" is not a
-    // distinction any of these feeds can express anyway.
-    const nowSec = Math.floor(Date.now() / DISCOVER_TTL_MS) * (DISCOVER_TTL_MS / 1000)
+    // Quantised to the cache TTL, and it MUST match it. These timestamps go
+    // straight into the apicalypse text, which is the cache key — a raw
+    // per-second `now` would mint a new key every second, and any window
+    // shorter than the TTL would mint one per window and multiply the
+    // upstream calls the cache is there to avoid. "A game released in the
+    // last hour" is not a distinction any of these feeds can express anyway.
+    const nowSec = Math.floor(Date.now() / CACHE_TTL_MS) * (CACHE_TTL_MS / 1000)
     const PC_PLATFORMS = '(6, 14, 3)'
 
     // ── Top 100 ───────────────────────────────────────────────────────────────
