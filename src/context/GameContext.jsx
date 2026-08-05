@@ -17,6 +17,9 @@ import {
   getUnenrichedGames,
   updateGameMetadata,
   getGamesNeedingCollectionEnrich,
+  getGamesNeedingImageEnrich,
+  getAppMeta,
+  setAppMeta,
   clearGameFranchise as dbClearFranchise,
   setGameCollection as dbSetCollection,
   clearGameCollection as dbClearCollection,
@@ -28,7 +31,7 @@ import {
   getInstallTarget,
 } from "../lib/launcher";
 import { syncLibrary } from "../lib/sync";
-import { enrichAllGames, enrichCollectionData } from "../lib/rawg";
+import { enrichAllGames, enrichCollectionData, enrichMissingImages } from "../lib/rawg";
 import { useAuth } from "./AuthContext";
 import { useNotifications } from "./NotificationContext";
 import {
@@ -54,6 +57,10 @@ import { followBus } from "../lib/followBus";
 import { applyCachedFollowChange } from "../lib/followedGamesStore";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+// app_meta key recording that the one-shot hero/logo repair has run on this
+// install. Versioned so a future fix can re-run the pass deliberately.
+const IMAGE_REPAIR_MARKER = "image_repair_v1_at";
 
 function normalizeTitleKey(value = "") {
   return String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -514,6 +521,48 @@ export function GameProvider({ children }) {
       .catch(() => {});
     return () => stopHeartbeat();
   }, [user, loading]);
+
+  // One-shot repair for libraries built by versions that accepted a partial
+  // SteamGridDB result as final — those games kept a cover but were left with
+  // no hero and/or logo, and metadata_fetched = 1 put them out of reach of the
+  // normal enrichment pass. Runs once per install (marker in app_meta) so
+  // games SteamGridDB genuinely has no art for aren't re-queried every launch.
+  const imageRepairStartedRef = useRef(false);
+  useEffect(() => {
+    if (loading) return;
+    // The marker is only written once the pass finishes, so without this the
+    // effect re-firing (refreshGames identity changes) could start a second
+    // concurrent pass over the same games.
+    if (imageRepairStartedRef.current) return;
+    imageRepairStartedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (await getAppMeta(IMAGE_REPAIR_MARKER)) return;
+        const pending = await getGamesNeedingImageEnrich();
+        if (cancelled) return;
+        if (pending.length > 0) {
+          const { repaired } = await enrichMissingImages(
+            pending,
+            updateGameMetadata,
+          );
+          if (cancelled) return;
+          if (repaired > 0) await refreshGames();
+          console.log(
+            `[images] repaired ${repaired}/${pending.length} games missing hero/logo`,
+          );
+        }
+        await setAppMeta(IMAGE_REPAIR_MARKER, new Date().toISOString());
+      } catch (err) {
+        // Leave the marker unset so the next launch retries.
+        imageRepairStartedRef.current = false;
+        console.warn("Image repair pass failed:", err?.message ?? err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, refreshGames]);
 
   // Periodic CLOUD sync (pull + push). The login-time sync alone meant a
   // running app never received changes made from another PC — deletions and

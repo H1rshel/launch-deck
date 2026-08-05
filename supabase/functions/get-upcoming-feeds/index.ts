@@ -5,6 +5,10 @@ import { rankGames } from '../_shared/upcomingScoring.ts'
 const IGDB_CLIENT_ID = Deno.env.get('IGDB_CLIENT_ID') ?? ''
 const IGDB_CLIENT_SECRET = Deno.env.get('IGDB_CLIENT_SECRET') ?? ''
 
+// PostgREST puts `in` lists in the URL, so chunk the followed-game lookup to
+// stay clear of URL length limits for users with very large follow lists.
+const FOLLOW_LOOKUP_CHUNK = 100
+
 // --- CORS Configuration ---
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -483,23 +487,34 @@ serve(async (req) => {
       const missingPairs = followedPairs.filter(p => !inPool.has(`${p.source}:${p.source_game_id}`))
       if (missingPairs.length > 0) {
         const pendingIgdbPairs: typeof missingPairs = []
-        const extras = await Promise.all(
-          missingPairs.map(async p => {
-            const { data } = await supabase
-              .from('upcoming_games_cache')
-              .select('*')
-              .eq('source', p.source)
-              .eq('source_game_id', p.source_game_id)
-              .maybeSingle()
-            if (data) return data
-            if (p.metadata) return p.metadata
-            if (p.source === 'igdb') {
-              pendingIgdbPairs.push(p)
-              return null
-            }
-            return fallbackFollowedGame(p)
-          })
-        )
+
+        // One query for the whole set, not one per followed game. This ran a
+        // separate round trip per missing follow on every single load — it is
+        // where the great majority of this table's single-row selects came
+        // from, and it grows linearly with how many games a user follows.
+        const byPair = new Map<string, any>()
+        const missingIds = [...new Set(missingPairs.map(p => String(p.source_game_id)))]
+        for (let i = 0; i < missingIds.length; i += FOLLOW_LOOKUP_CHUNK) {
+          const chunk = missingIds.slice(i, i + FOLLOW_LOOKUP_CHUNK)
+          const { data: rows } = await supabase
+            .from('upcoming_games_cache')
+            .select('*')
+            .in('source_game_id', chunk)
+          for (const row of rows ?? []) {
+            byPair.set(`${row.source}:${String(row.source_game_id)}`, row)
+          }
+        }
+
+        const extras = missingPairs.map(p => {
+          const hit = byPair.get(`${p.source}:${String(p.source_game_id)}`)
+          if (hit) return hit
+          if (p.metadata) return p.metadata
+          if (p.source === 'igdb') {
+            pendingIgdbPairs.push(p)
+            return null
+          }
+          return fallbackFollowedGame(p)
+        })
         extras.forEach((g: any) => { if (g) followingPool.push(g) })
 
         if (pendingIgdbPairs.length > 0) {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getFolders, addFolder, removeFolder, getUnenrichedGames, updateGameMetadata, addGame, restoreUserRemovedGame, setGameDetailsCache } from '../lib/db'
 import { pickFolder, scanForCandidates, importGames } from '../lib/scanner'
-import { enrichAllGames, fetchPreviewCover, fetchUnifiedGameData } from '../lib/rawg'
+import { enrichAllGames, fetchPreviewCover, fetchUnifiedGameData, fetchMissingSteamGridAssets } from '../lib/rawg'
 import { buildMetadataCacheKey, GAME_DETAIL_PROVIDERS, GAME_DETAIL_TTLS, getStaleAfterIso, normalizeMetadataPayload } from '../lib/gameDetailCache'
 import { useGameContext } from '../context/GameContext'
 import { useAuth } from '../context/AuthContext'
@@ -305,14 +305,28 @@ export function useScanner() {
       if (selectedGame._igdb_franchise) meta.franchise = selectedGame._igdb_franchise
 
       // 3. Fetch SteamGridDB assets (cover/hero/logo) — non-blocking on failure
+      let unified = null
       try {
-        const unified = await fetchUnifiedGameData(selectedGame.name)
-        if (unified) {
-          if (unified.cover) meta.cover_url = unified.cover
-          if (unified.hero) meta.hero_url = unified.hero
-          if (unified.logo) meta.logo_url = unified.logo
-        }
+        unified = await fetchUnifiedGameData(selectedGame.name)
       } catch (_) { /* SteamGridDB is optional */ }
+      if (unified) {
+        if (unified.cover) meta.cover_url = unified.cover
+        if (unified.hero) meta.hero_url = unified.hero
+        if (unified.logo) meta.logo_url = unified.logo
+      }
+      // The unified endpoint very often returns a cover but no hero and no
+      // logo. Taking it as the final answer is why manually added games came
+      // out with just a cover — and since this path also stamps
+      // metadata_fetched = 1, nothing ever revisited them. Ask for whatever is
+      // still missing; a complete unified result costs no extra requests.
+      const assets = await fetchMissingSteamGridAssets(selectedGame.name, {
+        cover: meta.cover_url,
+        hero: meta.hero_url,
+        logo: meta.logo_url,
+      })
+      meta.cover_url = assets.cover
+      if (assets.hero) meta.hero_url = assets.hero
+      if (assets.logo) meta.logo_url = assets.logo
 
       await updateGameMetadata(newGame.id, meta)
 
@@ -385,14 +399,24 @@ export function useScanner() {
       }
       if (sg._igdb_genres?.length) meta.genres = sg._igdb_genres.join(',')
       if (sg._igdb_franchise) meta.franchise = sg._igdb_franchise
+      let unified = null
       try {
-        const unified = await fetchUnifiedGameData(sg.name)
-        if (unified) {
-          if (unified.cover) meta.cover_url = unified.cover
-          if (unified.hero) meta.hero_url = unified.hero
-          if (unified.logo) meta.logo_url = unified.logo
-        }
+        unified = await fetchUnifiedGameData(sg.name)
       } catch (_) {}
+      if (unified) {
+        if (unified.cover) meta.cover_url = unified.cover
+        if (unified.hero) meta.hero_url = unified.hero
+        if (unified.logo) meta.logo_url = unified.logo
+      }
+      // Same partial-result gap as the add path above.
+      const assets = await fetchMissingSteamGridAssets(sg.name, {
+        cover: meta.cover_url,
+        hero: meta.hero_url,
+        logo: meta.logo_url,
+      })
+      meta.cover_url = assets.cover
+      if (assets.hero) meta.hero_url = assets.hero
+      if (assets.logo) meta.logo_url = assets.logo
 
       await updateGameMetadata(pendingRestore.existingId, meta)
 

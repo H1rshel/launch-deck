@@ -649,34 +649,29 @@ export async function enrichAllGames(getUnenriched, updateMeta, onProgress) {
         if (unified.hero) heroUrl = unified.hero
         if (unified.logo) logoUrl = unified.logo
       }
-      if (!unified || (!unified.hero && !unified.logo && !unified.cover)) {
-        const [grids, heroes, logos] = await Promise.all([
-          searchSteamGridAssets(titleForImages, 'grids').catch(() => []),
-          searchSteamGridAssets(titleForImages, 'heroes').catch(() => []),
-          searchSteamGridAssets(titleForImages, 'logos').catch(() => []),
-        ])
-        if (!bestCover && grids?.length > 0) bestCover = grids[0].url
-        if (!heroUrl && heroes?.length > 0) heroUrl = heroes[0].url
-        if (!logoUrl && logos?.length > 0) logoUrl = logos[0].url
-      }
     } catch (err) {
-      // fetchUnifiedGameData threw (e.g. missing API key, IPC failure) —
-      // fall back to the independent per-asset-type SteamGridDB search
-      // rather than leaving hero/logo empty for the whole game.
+      // fetchUnifiedGameData threw (e.g. missing API key, IPC failure) — the
+      // per-asset search below still runs and can fill everything in.
       console.warn(`SteamGridDB unified fetch failed for "${titleForImages}", falling back:`, err)
-      try {
-        const [grids, heroes, logos] = await Promise.all([
-          searchSteamGridAssets(titleForImages, 'grids').catch(() => []),
-          searchSteamGridAssets(titleForImages, 'heroes').catch(() => []),
-          searchSteamGridAssets(titleForImages, 'logos').catch(() => []),
-        ])
-        if (!bestCover && grids?.length > 0) bestCover = grids[0].url
-        if (!heroUrl && heroes?.length > 0) heroUrl = heroes[0].url
-        if (!logoUrl && logos?.length > 0) logoUrl = logos[0].url
-      } catch (fallbackErr) {
-        console.warn(`SteamGridDB fallback fetch failed for "${titleForImages}":`, fallbackErr)
-      }
     }
+
+    // Fill in whatever the unified call did NOT return, one asset type at a
+    // time. The unified endpoint routinely comes back with a cover but no hero
+    // or logo, and this fallback used to be gated on it returning nothing AT
+    // ALL — so the overwhelmingly common partial result (cover only) skipped
+    // the fallback entirely and the game was saved with empty hero/logo. It
+    // was then stamped metadata_fetched = 1 and never looked at again.
+    // Asking only for the missing types also means a complete unified result
+    // costs no extra requests at all, where the old fallback re-fetched all
+    // three.
+    const missingAssets = await fetchMissingSteamGridAssets(titleForImages, {
+      cover: bestCover,
+      hero: heroUrl,
+      logo: logoUrl,
+    })
+    bestCover = missingAssets.cover
+    heroUrl = missingAssets.hero
+    logoUrl = missingAssets.logo
 
     // SteamGridDB had nothing usable — fall back to IGDB's cover, then RAWG's.
     if (!bestCover) bestCover = igdbCoverUrl || rawgCoverUrl
@@ -839,6 +834,97 @@ export async function enrichCollectionData(games, updateMeta, onProgress) {
  * @param {string} query - the search string (e.g. game title)
  * @returns {Promise<object>} { id, name, releaseDate, genres, platforms, cover, hero, logo }
  */
+/**
+ * Image-only repair pass for games that came out of an earlier version with a
+ * cover but no hero and/or logo. Touches ONLY the missing image fields —
+ * never a cover that already resolved, and no metadata at all.
+ *
+ * SteamGridDB genuinely has no hero or logo for some games, so a game that
+ * comes back empty stays eligible and would be retried forever. The caller is
+ * responsible for bounding that — GameContext runs this once per install
+ * behind an app_meta marker, which avoids adding a column purely to record
+ * "already looked".
+ */
+export async function enrichMissingImages(games, updateMeta, onProgress) {
+  if (!isTauri) return { repaired: 0, total: 0 }
+
+  const total = games.length
+  let repaired = 0
+
+  for (let i = 0; i < games.length; i++) {
+    const game = games[i]
+    if (typeof onProgress === 'function') onProgress({ current: i + 1, total })
+
+    const title = game.normalized_title || game.title
+    if (!title) continue
+
+    try {
+      const assets = await fetchMissingSteamGridAssets(title, {
+        cover: game.cover_url,
+        hero: game.hero_url,
+        logo: game.logo_url,
+      })
+
+      const updates = {}
+      if (!game.hero_url && assets.hero) updates.hero_url = assets.hero
+      if (!game.logo_url && assets.logo) updates.logo_url = assets.logo
+      if (!game.cover_url && assets.cover) updates.cover_url = assets.cover
+
+      if (Object.keys(updates).length > 0) {
+        await updateMeta(game.id, updates)
+        repaired++
+      }
+    } catch (err) {
+      console.warn(`Image repair failed for "${title}":`, err?.message ?? err)
+    }
+
+    await delay(200)
+  }
+
+  return { repaired, total }
+}
+
+/**
+ * Fill in only the SteamGridDB asset types that are still missing.
+ *
+ * `current` holds whatever has already been resolved; the returned object has
+ * the same shape with any blanks filled where SteamGridDB had something. Asset
+ * types that are already present are never re-requested, and a failure on one
+ * type can't lose the others.
+ */
+export async function fetchMissingSteamGridAssets(title, current = {}) {
+  const result = {
+    cover: current.cover || '',
+    hero: current.hero || '',
+    logo: current.logo || '',
+  }
+  if (!title) return result
+
+  const wanted = [
+    !result.cover && ['cover', 'grids'],
+    !result.hero && ['hero', 'heroes'],
+    !result.logo && ['logo', 'logos'],
+  ].filter(Boolean)
+
+  if (wanted.length === 0) return result
+
+  const found = await Promise.all(
+    wanted.map(([, assetType]) =>
+      searchSteamGridAssets(title, assetType).catch((err) => {
+        console.warn(`SteamGridDB ${assetType} search failed for "${title}":`, err?.message ?? err)
+        return []
+      }),
+    ),
+  )
+
+  wanted.forEach(([key], i) => {
+    const assets = found[i]
+    if (assets?.length > 0) result[key] = assets[0].url
+  })
+
+  return result
+}
+
 export async function fetchUnifiedGameData(query) {
   if (!isTauri) return null
   try {

@@ -897,6 +897,33 @@ export async function getGamesNeedingCollectionEnrich() {
   )
 }
 
+/**
+ * Returns games that were already enriched (metadata_fetched = 1) but are
+ * missing a hero or logo image — eligible for a targeted image-only re-fetch.
+ *
+ * These exist because the add/enrich paths used to accept a partial
+ * SteamGridDB result (very commonly a cover with no hero and no logo) as
+ * final, then stamp metadata_fetched = 1, which put the game permanently out
+ * of reach of getUnenrichedGames.
+ */
+export async function getGamesNeedingImageEnrich() {
+  if (isTauri) {
+    await ensureTablesExist()
+    const conn = await getDb()
+    return conn.select(`
+      SELECT * FROM games
+      WHERE deleted = 0 AND user_removed = 0
+        AND metadata_fetched = 1
+        AND ((hero_url = '' OR hero_url IS NULL)
+          OR (logo_url = '' OR logo_url IS NULL))
+    `)
+  }
+  return getMemoryStore().filter(g =>
+    !g.deleted && !g.user_removed && g.metadata_fetched &&
+    (!g.hero_url || !g.logo_url)
+  )
+}
+
 export async function updateGameMetadata(id, metadata) {
   return updateGame(id, metadata)
 }
