@@ -12,6 +12,59 @@ const IGDB_SHARED_CACHE_DISABLED_TTL_MS = 1000 * 60 * 60 * 12
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// ── RAWG availability guard ──────────────────────────────────────────────────
+// RAWG is a SECONDARY source (IGDB is primary) and it does go down — during
+// one outage api.rawg.io and rawg.io both returned Cloudflare 522 for every
+// request. Without a timeout each call hangs, and enrichment tries up to three
+// queries per game, so a dead RAWG turned a library pass into a multi-minute
+// stall that produced nothing. Fail fast, then stop asking for a while.
+const RAWG_TIMEOUT_MS = 8000
+const RAWG_TRIP_AFTER_FAILURES = 3
+const RAWG_COOLDOWN_MS = 10 * 60 * 1000
+
+let _rawgConsecutiveFailures = 0
+let _rawgBlockedUntil = 0
+
+/** True while RAWG is being skipped after repeated failures. */
+export function isRawgUnavailable() {
+  return Date.now() < _rawgBlockedUntil
+}
+
+async function rawgFetch(url) {
+  if (isRawgUnavailable()) {
+    throw new Error('RAWG is not responding — try the IGDB source instead')
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), RAWG_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    // A 5xx is RAWG being broken; a 4xx is our request and shouldn't trip the
+    // breaker for everyone else.
+    if (res.status >= 500) {
+      throw new Error(
+        `RAWG is not responding (HTTP ${res.status}) — try the IGDB source instead`,
+      )
+    }
+    _rawgConsecutiveFailures = 0
+    return res
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      err = new Error('RAWG timed out — try the IGDB source instead')
+    }
+    _rawgConsecutiveFailures += 1
+    if (_rawgConsecutiveFailures >= RAWG_TRIP_AFTER_FAILURES) {
+      _rawgBlockedUntil = Date.now() + RAWG_COOLDOWN_MS
+      console.warn(
+        `RAWG unreachable (${_rawgConsecutiveFailures} failures) — skipping it for ${RAWG_COOLDOWN_MS / 60000} minutes`,
+      )
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function isMissingSharedCacheError(error, status) {
   const details = [
     error?.message,
@@ -70,7 +123,7 @@ function disableSharedIgdbCache(reason) {
 // Search RAWG for a game by name
 export async function searchGame(query) {
   const url = `${BASE_URL}/games?key=${API_KEY}&search=${encodeURIComponent(query)}&page_size=5`
-  const res = await fetch(url)
+  const res = await rawgFetch(url)
   if (!res.ok) return []
   const data = await res.json()
   return data.results || []
@@ -150,11 +203,16 @@ function isExactOrSeriesTitle(expected, candidate) {
  */
 export async function fetchGameMetadata(game) {
   // Search strategies in priority order
-  const queries = [game.raw_folder_name, game.title, game.raw_file_name].filter(
+  // Same ordering problem as the IGDB path above: the folder is often a build
+  // directory, so it must not be tried before the actual title.
+  const queries = [game.title, game.raw_folder_name, game.raw_file_name].filter(
     Boolean,
   )
 
   for (const query of queries) {
+    // Once the breaker is open there is no point walking the rest of the
+    // query variants — each would just wait out its own timeout.
+    if (isRawgUnavailable()) break
     try {
       const results = await searchGame(query)
       const match = bestMatch(results, query)
@@ -183,7 +241,7 @@ export async function fetchGameMetadata(game) {
  */
 export async function fetchRawgDetails(id) {
   try {
-    const res = await fetch(`${BASE_URL}/games/${id}?key=${API_KEY}`)
+    const res = await rawgFetch(`${BASE_URL}/games/${id}?key=${API_KEY}`)
     if (res.ok) {
       return await res.json()
     }
@@ -199,7 +257,7 @@ export async function fetchRawgMediaByTitle(title) {
     const match = bestMatch(results, title)
     if (!match?.id || !isExactOrSeriesTitle(title, match.name)) return null
 
-    const screenshotsRes = await fetch(`${BASE_URL}/games/${match.id}/screenshots?key=${API_KEY}`)
+    const screenshotsRes = await rawgFetch(`${BASE_URL}/games/${match.id}/screenshots?key=${API_KEY}`)
     const screenshotsData = screenshotsRes.ok ? await screenshotsRes.json() : null
     const screenshots = (screenshotsData?.results || [])
       .map((shot) => shot.image)
@@ -539,7 +597,14 @@ export async function enrichAllGames(getUnenriched, updateMeta, onProgress) {
     const game = games[i]
     onProgress?.({ current: i + 1, total })
 
-    const searchTitle = game.normalized_title || game.raw_folder_name || game.title || game.raw_file_name
+    // raw_folder_name is the exe's IMMEDIATE parent directory, which for a
+    // great many games is a build folder — "bin64", "Bin32", "Win64",
+    // "retail", "bin". Ten games in a real library scanned that way. Letting
+    // it outrank the scanner's detected title meant enrichment searched IGDB
+    // for "bin64" and attached whatever came back, which is how an auto-added
+    // game ended up with another game's name and metadata. Prefer the real
+    // title and keep the folder only as a later fallback.
+    const searchTitle = game.normalized_title || game.title || game.raw_folder_name || game.raw_file_name
     let igdbMeta = null
     let rawgMeta = null
     let igdbCoverUrl = ''

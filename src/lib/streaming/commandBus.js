@@ -122,7 +122,7 @@ export async function sendCommand(
  * Listen for commands targeted at this device. `handlers` maps command type →
  * async (payload, command) => result object. Returns a stop() function.
  */
-export function startCommandListener(userId, deviceId, handlers) {
+export function startCommandListener(userId, deviceId, handlers, { realtime = true } = {}) {
   const processed = new Set()
   let stopped = false
 
@@ -186,23 +186,34 @@ export function startCommandListener(userId, deviceId, handlers) {
 
   let realtimeHealthy = false
 
-  const channel = supabase
-    .channel(`device-commands-${deviceId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'device_commands',
-        filter: `target_device_id=eq.${deviceId}`,
-      },
-      (change) => {
-        if (change.new?.user_id === userId) processCommand(change.new)
-      },
-    )
-    .subscribe((status) => {
-      realtimeHealthy = status === 'SUBSCRIBED'
-    })
+  // Opening a Realtime channel is not free on the SERVER: Supabase's WAL
+  // poller (realtime.list_changes) then runs continuously for the tenant and
+  // decodes every WAL record to match it against subscriptions. Measured on
+  // this project it was 1.38M calls and 60% of ALL database execution time —
+  // by a wide margin the single largest consumer of the Disk IO budget.
+  //
+  // An account with only this device can never receive a command, so the
+  // subscription is pure cost. The caller decides; the sweep below still runs
+  // either way, so a device that appears later is picked up regardless.
+  const channel = realtime
+    ? supabase
+        .channel(`device-commands-${deviceId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'device_commands',
+            filter: `target_device_id=eq.${deviceId}`,
+          },
+          (change) => {
+            if (change.new?.user_id === userId) processCommand(change.new)
+          },
+        )
+        .subscribe((status) => {
+          realtimeHealthy = status === 'SUBSCRIBED'
+        })
+    : null
 
   // Startup sweep (commands that arrived while offline) + poll fallback whose
   // cadence follows the health of the Realtime channel above.
@@ -212,7 +223,10 @@ export function startCommandListener(userId, deviceId, handlers) {
     pollTimer = setTimeout(async () => {
       await sweep()
       scheduleSweep()
-    }, realtimeHealthy ? LISTENER_IDLE_POLL_MS : LISTENER_POLL_MS)
+      // With Realtime deliberately off there is nothing to be a fallback FOR,
+      // and no second device to send anything, so sweep at the slow cadence
+      // rather than the tight one meant for a broken channel.
+    }, realtimeHealthy || !realtime ? LISTENER_IDLE_POLL_MS : LISTENER_POLL_MS)
   }
   sweep()
   scheduleSweep()
@@ -228,6 +242,6 @@ export function startCommandListener(userId, deviceId, handlers) {
   return () => {
     stopped = true
     if (pollTimer) clearTimeout(pollTimer)
-    supabase.removeChannel(channel)
+    if (channel) supabase.removeChannel(channel)
   }
 }
