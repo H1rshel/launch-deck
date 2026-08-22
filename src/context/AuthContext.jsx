@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react'
-import { supabase } from '../lib/supabase'
+import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react'
+import { supabase, readPersistedSession } from '../lib/supabase'
 import { getAuthRedirectUrl, shouldOpenExternalBrowser } from '../services/authRedirectService'
 
 const AuthContext = createContext(null)
@@ -12,11 +12,22 @@ export const _authBridge = {
   setError: null,
 }
 
+// How long the auth server gets to answer before we tell the user it looks
+// unreachable. This only drives a message — it never gates the UI.
+const BACKEND_UNREACHABLE_MS = 8_000
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
-  const [session, setSession] = useState(null)
+  // Boot state comes straight from localStorage, synchronously. Startup must
+  // never await the network: when Supabase is slow or down, getSession() can
+  // take minutes or hang outright, and gating the UI on it left the app
+  // sitting on "Initializing..." indefinitely. The auth client reconciles
+  // this in the background (see the effect below).
+  const bootSession = useMemo(() => readPersistedSession(), [])
+
+  const [user, setUser] = useState(bootSession?.user ?? null)
+  const [session, setSession] = useState(bootSession)
   const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState(null)
   const profileSyncRef = useRef(null)
@@ -45,6 +56,11 @@ export function AuthProvider({ children }) {
     profileSyncRef.current = authUser.id
 
     const fallback = buildLocalProfile(authUser)
+
+    // Show the name/avatar from the auth token straight away. Everything below
+    // is a network round-trip, and the header should not sit empty waiting on
+    // it — the fetched row simply replaces this when it arrives.
+    setProfile((prev) => prev ?? fallback)
 
     try {
       // Use maybeSingle() instead of single() to avoid 406 when row doesn't exist
@@ -113,40 +129,60 @@ export function AuthProvider({ children }) {
       }
     )
 
-    async function restoreInitialSession() {
+    // The UI is already rendered from the persisted session at this point.
+    // This call only confirms/corrects it, so it is deliberately not awaited
+    // by anything the user is waiting on.
+    let settled = false
+
+    const unreachableTimer = setTimeout(() => {
+      if (settled || !mounted) return
+      setError(
+        bootSession
+          ? 'Could not reach Launch Deck servers — showing your last synced data.'
+          : 'Could not reach Launch Deck servers. Check your connection and try again.'
+      )
+      if (import.meta.env.DEV) {
+        console.warn('[Auth] auth server has not responded in %dms', BACKEND_UNREACHABLE_MS)
+      }
+    }, BACKEND_UNREACHABLE_MS)
+
+    async function reconcileSession() {
       try {
         const { data, error: sessionError } = await supabase.auth.getSession()
+        settled = true
         if (!mounted) return
 
         if (sessionError) throw sessionError
 
-        const initialSession = data?.session ?? null
-        setSession(initialSession)
-        setUser(initialSession?.user ?? null)
+        // Only overwrite the hydrated session once the server has actually
+        // spoken — a network failure must not sign the user out.
+        const confirmed = data?.session ?? null
+        setSession(confirmed)
+        setUser(confirmed?.user ?? null)
+        setError((prev) => (prev && prev.startsWith('Could not reach') ? null : prev))
       } catch (err) {
+        settled = true
         if (!mounted) return
 
         if (import.meta.env.DEV) {
-          console.error('[Auth] Failed to restore initial session:', err)
+          console.error('[Auth] Session reconcile failed:', err)
         }
-
-        setSession(null)
-        setUser(null)
+        // Keep whatever was hydrated from storage; supabase-js retries the
+        // refresh on its own and onAuthStateChange will correct us.
       } finally {
-        if (mounted) {
-          setSigningIn(false)
-          setLoading(false)
-        }
+        clearTimeout(unreachableTimer)
+        if (mounted) setSigningIn(false)
       }
     }
 
-    restoreInitialSession()
+    reconcileSession()
 
     return () => {
       mounted = false
+      clearTimeout(unreachableTimer)
       subscription.unsubscribe()
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- bootSession is read once at mount
 
   // Sync profile whenever user changes (separate from auth listener to avoid deadlock)
   useEffect(() => {

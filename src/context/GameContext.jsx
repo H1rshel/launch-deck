@@ -505,16 +505,6 @@ export function GameProvider({ children }) {
     let mounted = true;
 
     async function init() {
-      // Fetch session directly to bypass hook timing dependencies
-      let session = null;
-      try {
-        ({
-          data: { session },
-        } = await supabase.auth.getSession());
-      } catch (err) {
-        console.warn("getSession failed:", err);
-      }
-
       // Readiness is gated ONLY on the local database (fast, on-disk SQLite).
       // First paint must never wait on the network.
       try {
@@ -531,21 +521,35 @@ export function GameProvider({ children }) {
         if (mounted) setLoading(false);
       }
 
-      // Preload the Dashboard's upcoming feed in the BACKGROUND. This is a
-      // Supabase edge-function round-trip — previously it was awaited before the
-      // app was marked ready, so the splash/first paint hung on the network
-      // (and edge cold-starts). The Upcoming section renders its own skeleton
-      // and fetches independently, so this is purely an optimisation.
-      if (mounted && session?.user?.id) {
-        preloadUpcomingFeeds(session.user.id, "for_you").catch(() => {});
-      }
-
       // Run first sync after DB is ready (non-blocking)
       if (mounted) {
         runSync();
         syncIntervalRef.current = setInterval(() => {
           if (mounted) runSync();
         }, SYNC_INTERVAL_MS);
+      }
+
+      // The session lookup is a network call (supabase-js refreshes the token
+      // during its own initialization), so it must stay BELOW the
+      // setLoading(false) above — when Supabase is unreachable it can stall,
+      // and gating readiness on it froze the app on the loading screen.
+      let session = null;
+      try {
+        ({
+          data: { session },
+        } = await supabase.auth.getSession());
+      } catch (err) {
+        console.warn("getSession failed:", err);
+      }
+      if (!mounted) return;
+
+      // Preload the Dashboard's upcoming feed in the BACKGROUND. This is a
+      // Supabase edge-function round-trip — previously it was awaited before the
+      // app was marked ready, so the splash/first paint hung on the network
+      // (and edge cold-starts). The Upcoming section renders its own skeleton
+      // and fetches independently, so this is purely an optimisation.
+      if (session?.user?.id) {
+        preloadUpcomingFeeds(session.user.id, "for_you").catch(() => {});
       }
     }
 
