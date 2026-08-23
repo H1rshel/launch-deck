@@ -82,7 +82,7 @@ export default function TopBar({ searchQuery, onSearchChange, backAction }) {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search your gaming universe…"
+            placeholder={isGlobalSearch ? 'Search your gaming universe…' : 'Search your library…'}
             value={isGlobalSearch ? '' : (searchQuery || '')}
             onChange={isGlobalSearch ? undefined : (e) => onSearchChange?.(e.target.value)}
             className="topbar__search-input"

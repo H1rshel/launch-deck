@@ -4,6 +4,7 @@ import PageHeader from "../components/layout/PageHeader"
 import GameGrid from "../components/games/GameGrid"
 import CompactGameCard from "../components/games/CompactGameCard"
 import CollectionSearchModal from "../components/games/CollectionSearchModal"
+import GlobalSearchSection from "../components/search/GlobalSearchSection"
 import { useGames } from "../hooks/useGames"
 import { useTabIndicator } from "../hooks/useTabIndicator"
 import { useGameContext } from "../context/GameContext"
@@ -432,6 +433,7 @@ export default function Library() {
     setSortBy,
     searchQuery,
     setSearchQuery,
+    loading,
   } = useGames()
   const { tabRef: filterTabRef, indicatorStyle: filterIndicatorStyle } = useTabIndicator(filter)
   const {
@@ -448,6 +450,7 @@ export default function Library() {
   } = useGameContext()
 
   const totalCount = gameCounts.all ?? games.length
+  const trimmedQuery = searchQuery.trim()
 
   return (
     <div className="page library page--unified">
@@ -517,7 +520,20 @@ export default function Library() {
             onClearCollection={clearGameCollection}
           />
         ) : (
-          <GameGrid games={games} onRemoveGame={removeGame} />
+          <GameGrid
+            games={games}
+            onRemoveGame={removeGame}
+            emptyMessage={
+              trimmedQuery
+                ? `No games in your library match “${trimmedQuery}”.`
+                : undefined
+            }
+          />
+        )}
+
+        {/* Library first, then the rest of the world on request. */}
+        {!loading && (
+          <GlobalSearchSection query={trimmedQuery} libraryCount={games.length} />
         )}
       </div>
     </div>

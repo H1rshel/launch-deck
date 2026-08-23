@@ -2,6 +2,7 @@ import TopBar from '../components/layout/TopBar'
 import FeaturedHero from '../components/games/FeaturedHero'
 import GameGrid from '../components/games/GameGrid'
 import UpcomingSection from '../components/games/UpcomingSection'
+import GlobalSearchSection from '../components/search/GlobalSearchSection'
 import { useGames } from '../hooks/useGames'
 import { useGameContext } from '../context/GameContext'
 
@@ -27,15 +28,21 @@ export default function Dashboard() {
       <TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} />
       <div className="page__content">
         {isSearching ? (
-          /* Active search: show a single dedicated results grid instead of
-             leaking matches into the "Recently Played" / "Your Library" rows. */
-          <GameGrid
-            games={games}
-            title={`Search results for “${trimmedQuery}”`}
-            onRemoveGame={removeGame}
-            loading={loading}
-            emptyMessage={`No games match “${trimmedQuery}”.`}
-          />
+          /* Active search: library first in a dedicated results grid instead of
+             leaking matches into the "Recently Played" / "Your Library" rows,
+             with global (IGDB) results available underneath it. */
+          <>
+            <GameGrid
+              games={games}
+              title={`In your library — “${trimmedQuery}”`}
+              onRemoveGame={removeGame}
+              loading={loading}
+              emptyMessage={`No games in your library match “${trimmedQuery}”.`}
+            />
+            {!loading && (
+              <GlobalSearchSection query={trimmedQuery} libraryCount={games.length} />
+            )}
+          </>
         ) : (
           <>
             <FeaturedHero game={featuredGame} />
