@@ -52,7 +52,6 @@ import DeleteFeedbackModal from "../components/games/DeleteFeedbackModal";
 import LaunchConfirmModal from "../components/games/LaunchConfirmModal";
 import { supabase } from "../lib/supabase";
 import {
-  preloadUpcomingFeeds,
   updateFeedCachesOnFollow,
   getCachedFollowingItems,
 } from "../hooks/useUpcomingGames";
@@ -61,6 +60,15 @@ import { followBus } from "../lib/followBus";
 import { applyCachedFollowChange, gameKey as followedGameKey } from "../lib/followedGamesStore";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Upper bound on how long the header may claim a cloud sync is running. A real
+// sync is well under this even on a slow link with a large library; past it the
+// indicator is lying to the user, whatever the underlying request is doing.
+const CLOUD_SYNC_WATCHDOG_MS = 90 * 1000;
+
+// How long the startup cloud sync yields to first paint and the dashboard's
+// own requests before it begins.
+const STARTUP_SYNC_DELAY_MS = 2500;
 
 // app_meta key recording that the one-shot hero/logo repair has run on this
 // install. Versioned so a future fix can re-run the pass deliberately.
@@ -136,12 +144,49 @@ export function GameProvider({ children }) {
 
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
 
+  // A plain boolean over these events was wrong in both directions: with a
+  // pull and a push overlapping, the first "end" cleared the icon while the
+  // second run was still going, and any "end" that never arrived (a request
+  // stalled until its 60s timeout, the sync throwing past its own handler)
+  // left the icon spinning for the rest of the session. Count the runs
+  // instead, and put a ceiling on how long the count is allowed to stand.
+  const cloudSyncDepthRef = useRef(0);
   useEffect(() => {
-    const handleStart = () => setIsCloudSyncing(true);
-    const handleEnd = () => setIsCloudSyncing(false);
+    let watchdog = null;
+
+    const clearWatchdog = () => {
+      if (watchdog) {
+        clearTimeout(watchdog);
+        watchdog = null;
+      }
+    };
+
+    const handleStart = () => {
+      cloudSyncDepthRef.current += 1;
+      setIsCloudSyncing(true);
+      clearWatchdog();
+      watchdog = setTimeout(() => {
+        // Nothing legitimate takes this long. Whatever is still pending has
+        // stopped being something the user should be told about.
+        console.warn("[GameContext] cloud sync watchdog fired — clearing the syncing indicator");
+        cloudSyncDepthRef.current = 0;
+        setIsCloudSyncing(false);
+        watchdog = null;
+      }, CLOUD_SYNC_WATCHDOG_MS);
+    };
+
+    const handleEnd = () => {
+      cloudSyncDepthRef.current = Math.max(0, cloudSyncDepthRef.current - 1);
+      if (cloudSyncDepthRef.current === 0) {
+        clearWatchdog();
+        setIsCloudSyncing(false);
+      }
+    };
+
     window.addEventListener("cloud-sync-start", handleStart);
     window.addEventListener("cloud-sync-end", handleEnd);
     return () => {
+      clearWatchdog();
       window.removeEventListener("cloud-sync-start", handleStart);
       window.removeEventListener("cloud-sync-end", handleEnd);
     };
@@ -383,13 +428,30 @@ export function GameProvider({ children }) {
   }, [loading, games])
 
   const followingCleanupRunningRef = useRef(false);
+  const followingCleanupSigRef = useRef(null);
   useEffect(() => {
     if (!user?.id || loading || games.length === 0 || followingCleanupRunningRef.current) return;
+
+    // `games` is a fresh array on every refresh, so this effect re-fired for
+    // each setGames during startup — three identical passes, two Supabase
+    // queries apiece, competing for the same connections as the feed the
+    // dashboard was waiting on. Only the library's actual contents matter
+    // here, so re-run when those change and not when the array does.
+    const signature = `${user.id}|${games.length}|${games
+      .map((g) => g.id)
+      .sort()
+      .join(",")}`;
+    if (followingCleanupSigRef.current === signature) return;
+    followingCleanupSigRef.current = signature;
 
     let cancelled = false;
     followingCleanupRunningRef.current = true;
     removeLibraryGamesFromFollowing(games)
-      .catch((err) => console.warn("Library/Following cleanup failed:", err))
+      .catch((err) => {
+        // Let the next refresh retry rather than caching a failed pass.
+        followingCleanupSigRef.current = null;
+        console.warn("Library/Following cleanup failed:", err);
+      })
       .finally(() => {
         followingCleanupRunningRef.current = false;
       });
@@ -529,28 +591,13 @@ export function GameProvider({ children }) {
         }, SYNC_INTERVAL_MS);
       }
 
-      // The session lookup is a network call (supabase-js refreshes the token
-      // during its own initialization), so it must stay BELOW the
-      // setLoading(false) above — when Supabase is unreachable it can stall,
-      // and gating readiness on it froze the app on the loading screen.
-      let session = null;
-      try {
-        ({
-          data: { session },
-        } = await supabase.auth.getSession());
-      } catch (err) {
-        console.warn("getSession failed:", err);
-      }
-      if (!mounted) return;
-
-      // Preload the Dashboard's upcoming feed in the BACKGROUND. This is a
-      // Supabase edge-function round-trip — previously it was awaited before the
-      // app was marked ready, so the splash/first paint hung on the network
-      // (and edge cold-starts). The Upcoming section renders its own skeleton
-      // and fetches independently, so this is purely an optimisation.
-      if (session?.user?.id) {
-        preloadUpcomingFeeds(session.user.id, "for_you").catch(() => {});
-      }
+      // The Dashboard's upcoming feed is preloaded by App.jsx, off the session
+      // AuthProvider already hydrated synchronously from storage. This used to
+      // duplicate that here behind its own getSession() — a second network call
+      // whose only job was to arrive at the same user id, and a second preload
+      // racing the first for the handful of connections the WebView allows to
+      // the Supabase origin. Both are exactly the contention that left the
+      // Upcoming row on skeletons while the cloud sync held the pool.
     }
 
     init();
@@ -634,12 +681,20 @@ export function GameProvider({ children }) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [user, loading, refreshGames]);
+  }, [user?.id, loading, refreshGames]);
 
   // Handle cloud sync when user logs in or DB finishes loading
   useEffect(() => {
     let mounted = true;
+    let startTimer = null;
     if (user && !loading) {
+      // Held back a moment on purpose. This pass is a long series of Supabase
+      // round trips, and the WebView opens only a handful of connections to
+      // that origin — starting it the instant the library loads put it ahead
+      // of the requests the user is actually looking at, so the dashboard sat
+      // on skeletons behind a sync nobody was waiting for. Nothing here is
+      // time-critical; the visible content goes first.
+      startTimer = setTimeout(() => {
       (async () => {
         try {
           const syncResult = await syncCloudToLocal(user.id);
@@ -666,11 +721,16 @@ export function GameProvider({ children }) {
           console.error("Cloud sync failed:", err);
         }
       })();
+      }, STARTUP_SYNC_DELAY_MS);
     }
     return () => {
       mounted = false;
+      if (startTimer) clearTimeout(startTimer);
     };
-  }, [user, loading, refreshGames, removeLibraryGamesFromFollowing]);
+    // Keyed on the user ID, not the user object: AuthProvider hands out a new
+    // object on every auth event, and depending on the object re-ran the whole
+    // pull + push each time one arrived.
+  }, [user?.id, loading, refreshGames, removeLibraryGamesFromFollowing]);
 
   // Cleanup live interval on unmount
   useEffect(() => {

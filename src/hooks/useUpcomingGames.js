@@ -18,18 +18,28 @@ import {
 const _feedCache = new Map();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const RECENT_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — recent releases update frequently
+// Past the TTL an entry stops counting as fresh but stays worth showing while
+// a refresh runs. Only past this much wider bound is it dropped for good.
+const STALE_RENDER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Set by preloadUpcomingFeeds so the hook's synchronous useState initializer
 // can look up cached data before useAuth() resolves the user.
 let _preloadedUserId = null;
 
-// ── localStorage persistence ──────────────────────────────────────────────────
-// The in-memory cache above is lost on every app restart, so the dashboard's
-// Upcoming row had to re-hit the edge function on each launch (visible skeleton
-// delay). Persisting it — plus the last user id — lets the row hydrate instantly
-// from the previous session, then refresh in the background.
-const _PERSIST_KEY = "ld_upcoming_feed_cache_v1";
+// ── Persistence ───────────────────────────────────────────────────────────────
+// The in-memory cache above is lost on every app restart, so without a durable
+// copy the dashboard's Upcoming row re-hits the edge function on each launch —
+// a visible skeleton delay every single time. The cache lives in SQLite (see
+// below); localStorage keeps only the last user id, which is small enough to
+// store reliably and is needed synchronously to key a lookup on first render.
 const _LAST_USER_KEY = "ld_upcoming_last_user_id";
+
+// Older builds tried to keep the whole cache here. Drop anything they left.
+try {
+  localStorage.removeItem("ld_upcoming_feed_cache_v1");
+} catch {
+  /* ignore */
+}
 
 try {
   _preloadedUserId = localStorage.getItem(_LAST_USER_KEY) || null;
@@ -37,31 +47,17 @@ try {
   /* ignore */
 }
 
-try {
-  const raw = localStorage.getItem(_PERSIST_KEY);
-  if (raw) {
-    const obj = JSON.parse(raw);
-    const now = Date.now();
-    for (const [k, v] of Object.entries(obj)) {
-      const feedInKey = k.split("|")[1];
-      const ttl = feedInKey === "recent" ? RECENT_CACHE_TTL_MS : CACHE_TTL_MS;
-      if (v && typeof v.ts === "number" && now - v.ts <= ttl) {
-        _feedCache.set(k, v);
-      }
-    }
-  }
-} catch {
-  /* corrupt cache — ignore */
-}
+// The feed cache itself is NOT kept here. Inspecting the WebView2 store found
+// `ld_upcoming_last_user_id` written and `ld_upcoming_feed_cache_v1` absent,
+// every launch, while the SQLite mirror of the same JSON held 367 KB — the
+// blob simply does not survive a localStorage write at that size. Retrying it
+// each time bought nothing and cost a synchronous main-thread serialize of the
+// whole cache on the way. SQLite is the store; this key is only the pointer.
 
 // ── Durable persistence (SQLite app_meta) ────────────────────────────────────
-// localStorage alone proved unreliable here: an inspection of the WebView2
-// store found none of this module's `ld_*` keys present at all — not even the
-// tiny last-user-id — while other keys written by the app were there. Whatever
-// the cause, this is the same class of problem that moved device identity out
-// of localStorage and into app_meta, so the cache now lives in both places:
-// localStorage stays as the SYNCHRONOUS fast path (it lets the row hydrate
-// during the very first render), and SQLite is the durable copy behind it.
+// SQLite is the only store that actually holds this cache, so it is the only
+// one written. It is read asynchronously, which is why the hydration below
+// publishes a version bump the hook subscribes to.
 const _SQLITE_KEY = "upcoming_feed_cache_v1";
 const _LAST_USER_SQLITE_KEY = "upcoming_last_user_id";
 
@@ -71,14 +67,43 @@ function _warnPersist(what, err) {
   console.warn(`[useUpcomingFeeds] ${what}:`, err?.message ?? err);
 }
 
+// Hydration is asynchronous, but the hook's useState initializers run on the
+// very first render — long before it lands. Without a way to hear about it, a
+// hook that mounted to an empty cache stayed empty and went to the network for
+// data that was already on disk. That is what made every single launch a cold
+// fetch, skeletons and all.
+let _cacheVersion = 0;
+const _cacheListeners = new Set();
+
+function _bumpCacheVersion() {
+  _cacheVersion += 1;
+  for (const listener of _cacheListeners) {
+    try {
+      listener(_cacheVersion);
+    } catch {
+      /* a bad subscriber must not stop the others */
+    }
+  }
+}
+
+export function subscribeToFeedCache(listener) {
+  _cacheListeners.add(listener);
+  return () => _cacheListeners.delete(listener);
+}
+
+export function getFeedCacheVersion() {
+  return _cacheVersion;
+}
+
 function _mergeIntoCache(obj) {
   const now = Date.now();
   for (const [k, v] of Object.entries(obj || {})) {
     // A copy already in memory is at least as fresh as a stored one.
     if (_feedCache.has(k)) continue;
-    const feedInKey = k.split("|")[1];
-    const ttl = feedInKey === "recent" ? RECENT_CACHE_TTL_MS : CACHE_TTL_MS;
-    if (v && typeof v.ts === "number" && now - v.ts <= ttl) _feedCache.set(k, v);
+    // Restored up to the stale-render bound, not the TTL: a past-TTL entry is
+    // exactly the one worth painting while its refresh runs.
+    if (v && typeof v.ts === "number" && now - v.ts <= STALE_RENDER_MAX_AGE_MS)
+      _feedCache.set(k, v);
   }
 }
 
@@ -98,19 +123,36 @@ function _hydrateFromSqlite() {
         if (!_preloadedUserId && lastUser) _preloadedUserId = lastUser;
       } catch (err) {
         _warnPersist("SQLite cache hydrate failed", err);
+      } finally {
+        // Wake any hook that already rendered against an empty cache.
+        _bumpCacheVersion();
       }
     })();
   }
   return _sqliteHydration;
 }
 
+// Start reading the durable cache the instant this module is imported, rather
+// than waiting for the first preloadUpcomingFeeds() call — which sits behind
+// auth resolving and then behind its own followed-set round trip. This is a
+// local SQLite read; it typically lands within the first few frames, so the
+// dashboard row paints from disk instead of waiting on the network.
+_hydrateFromSqlite();
+
 let _persistTimer = null;
 function _persistCache() {
   if (_persistTimer) return;
   _persistTimer = setTimeout(() => {
     _persistTimer = null;
+    // Only page 1 of each feed is worth keeping. Pages 2+ exist to restore an
+    // accumulated "load more" list within a session; on a cold start the user
+    // is back on page 1 regardless, and persisting every page is what grew
+    // this blob to 367 KB — the whole of which was re-serialized on each write.
     const obj = {};
-    for (const [k, v] of _feedCache) obj[k] = v;
+    for (const [k, v] of _feedCache) {
+      if (k.split("|")[3] !== "1") continue;
+      obj[k] = v;
+    }
 
     let json;
     try {
@@ -118,13 +160,6 @@ function _persistCache() {
     } catch (err) {
       _warnPersist("cache serialization failed", err);
       return;
-    }
-
-    try {
-      localStorage.setItem(_PERSIST_KEY, json);
-    } catch (err) {
-      // Quota is the likely one; the SQLite write below has no such limit.
-      _warnPersist("localStorage cache write failed", err);
     }
 
     setAppMeta(_SQLITE_KEY, json).catch((err) =>
@@ -145,17 +180,44 @@ function _cacheKey(userId, feed, timeframe, page, date_from, date_to, sort) {
   ].join("|");
 }
 
+// Cache key format: userId|feed|timeframe|page|date_from|date_to|sort
+function _ttlFor(key) {
+  return key.split("|")[1] === "recent" ? RECENT_CACHE_TTL_MS : CACHE_TTL_MS;
+}
+
+/** Fresh enough to serve WITHOUT going to the network. */
 function _getCached(key) {
   const entry = _feedCache.get(key);
   if (!entry) return null;
-  // Cache key format: userId|feed|timeframe|page|date_from|date_to|sort
-  const feedInKey = key.split("|")[1];
-  const ttl = feedInKey === "recent" ? RECENT_CACHE_TTL_MS : CACHE_TTL_MS;
-  if (Date.now() - entry.ts > ttl) {
-    _feedCache.delete(key);
+  const age = Date.now() - entry.ts;
+  if (age > _ttlFor(key)) {
+    // Deliberately not deleted at the TTL any more — see _getRenderableCached.
+    if (age > STALE_RENDER_MAX_AGE_MS) _feedCache.delete(key);
     return null;
   }
   return entry;
+}
+
+/**
+ * The best entry to PUT ON SCREEN, which is a different question from whether
+ * the cache is fresh enough to skip the network.
+ *
+ * With a 24h TTL and an app people open about once a day, the cached copy was
+ * essentially always a little past expiry at launch — so the persisted cache
+ * was thrown away and every start paid for a cold fetch behind a skeleton row,
+ * which is the thing the cache existed to prevent. Upcoming releases do not
+ * churn by the hour: showing yesterday's copy immediately and refreshing it
+ * behind the user's back is strictly better than showing nothing.
+ */
+function _getRenderableCached(key) {
+  const entry = _feedCache.get(key);
+  if (!entry) return null;
+  const age = Date.now() - entry.ts;
+  if (age > STALE_RENDER_MAX_AGE_MS) {
+    _feedCache.delete(key);
+    return null;
+  }
+  return { entry, stale: age > _ttlFor(key) };
 }
 
 function _setCache(key, payload) {
@@ -389,6 +451,27 @@ const TIMEFRAME_MAP = {
 
 const ALL_FEEDS = ["for_you", "following", "soon", "recent", "big_releases", "popular"];
 
+// The supabase client caps a request at 60s. That is a sane ceiling for a
+// background sync and a terrible one for a row of cards the user is looking
+// at: `loading` stays true the whole time and the section shows skeletons,
+// which is indistinguishable from the feed being broken. Give the feed its
+// own, much shorter deadline so a stall becomes a visible error state that
+// the next render can retry, never an indefinite skeleton.
+const FEED_REQUEST_TIMEOUT_MS = 20_000;
+
+function withDeadline(promise, ms, what) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${what} timed out after ${ms}ms`)),
+        ms,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 // In-flight preload promises keyed by cache key. Lets the useUpcomingGames
 // effect await an already-running preload instead of firing a duplicate call.
 const _preloadInflight = new Map();
@@ -399,8 +482,24 @@ const _preloadInflight = new Map();
  * Remaining feeds start in parallel immediately.
  * Duplicate calls for the same key are deduplicated automatically.
  */
-export async function preloadUpcomingFeeds(userId, activeFeed = "for_you") {
-  if (!userId) return;
+// One run per user at a time. Both the app shell and the Discover route ask
+// for a preload on mount, and an auth event can re-trigger either — each call
+// re-ran the followed-set query and the SQLite hydration before it got as far
+// as the request-level dedupe below.
+const _preloadRuns = new Map();
+
+export function preloadUpcomingFeeds(userId, activeFeed = "for_you") {
+  if (!userId) return Promise.resolve();
+  const existing = _preloadRuns.get(userId);
+  if (existing) return existing;
+  const run = _preloadUpcomingFeeds(userId, activeFeed).finally(() =>
+    _preloadRuns.delete(userId),
+  );
+  _preloadRuns.set(userId, run);
+  return run;
+}
+
+async function _preloadUpcomingFeeds(userId, activeFeed) {
   _preloadedUserId = userId;
   try {
     localStorage.setItem(_LAST_USER_KEY, userId);
@@ -505,6 +604,17 @@ async function _preloadAllFeeds(userId, timeframe, sort) {
     }
   }
 
+  // The bulk call fills every feed, but it used to register itself under this
+  // one synthetic key — so the hook, which looks itself up by its OWN feed's
+  // key, never saw a preload in flight and fired a second, redundant request
+  // for a feed the bulk response was already about to deliver. On a cold start
+  // that meant the dashboard's Upcoming row raced the very call that was
+  // fetching its data, both of them queued behind the cloud sync's requests.
+  // Publishing the same promise under each feed's key lets the hook await it.
+  const feedKeys = ALL_FEEDS.map((f) =>
+    _cacheKey(userId, f, timeframe, 1, undefined, undefined, sort),
+  );
+
   const promise = (async () => {
     try {
       const { data, error } = await supabase.functions.invoke("get-upcoming-feeds", {
@@ -533,10 +643,17 @@ async function _preloadAllFeeds(userId, timeframe, sort) {
       return false;
     } finally {
       _preloadInflight.delete(bulkKey);
+      for (const k of feedKeys) {
+        if (_preloadInflight.get(k) === promise) _preloadInflight.delete(k);
+      }
     }
   })();
 
   _preloadInflight.set(bulkKey, promise);
+  // Only claim a feed no per-feed preload is already fetching.
+  for (const k of feedKeys) {
+    if (!_preloadInflight.has(k)) _preloadInflight.set(k, promise);
+  }
   return promise;
 }
 
@@ -584,7 +701,12 @@ export function useUpcomingGames(options = {}) {
   // preloaded cache even before useAuth() resolves the user object.
   const effectiveUserId = user?.id || _preloadedUserId;
   const initKey = _cacheKey(effectiveUserId, feed, timeframe, page, date_from, date_to, sort);
-  const initCache = effectiveUserId ? _getCached(initKey) : null;
+  // Renderable, not merely fresh: a past-TTL copy still beats a skeleton, and
+  // the effect below refreshes it. `loading` starts true for a stale hit so the
+  // revalidation is reflected — but with items on screen that reads as
+  // isRefetching, never isInitializing, so no skeleton row appears.
+  const initRenderable = effectiveUserId ? _getRenderableCached(initKey) : null;
+  const initCache = initRenderable?.entry ?? null;
   const initFollowedSet = getCachedFollowedSet(effectiveUserId);
 
   const [games, setGames] = useState(() => {
@@ -597,7 +719,7 @@ export function useUpcomingGames(options = {}) {
   });
   const [meta, setMeta] = useState(() => (initCache ? initCache.meta : null));
   const [facets, setFacets] = useState(() => (initCache ? initCache.facets : null));
-  const [loading, setLoading] = useState(() => !initCache);
+  const [loading, setLoading] = useState(() => !initCache || initRenderable.stale);
   const [error, setError] = useState(null);
 
   const [followedSet, setFollowedSet] = useState(() => {
@@ -613,6 +735,13 @@ export function useUpcomingGames(options = {}) {
   // Subscribe to cross-hook follow change notifications
   const [followVersion, setFollowVersion] = useState(() => followBus.getVersion());
   useEffect(() => followBus.subscribe(setFollowVersion), []);
+
+  // The durable cache is read from SQLite asynchronously, so on a cold start it
+  // usually lands a few frames AFTER this hook's state initializers have
+  // already run against an empty map. Re-run the effect when it does: the
+  // cache branch below then paints the row from disk instead of the network.
+  const [cacheVersion, setCacheVersion] = useState(() => getFeedCacheVersion());
+  useEffect(() => subscribeToFeedCache(setCacheVersion), []);
 
   const followedSetFetchId = useRef(0);
   const pendingToggles = useRef(new Set());
@@ -630,8 +759,14 @@ export function useUpcomingGames(options = {}) {
     const currentFetch = ++fetchCounter.current;
 
     async function fetchFeed() {
-      // Wait until we have a user ID — otherwise we'd fetch as anon and miss personalization
-      if (!user?.id) return;
+      // Wait until we have a user ID — otherwise we'd fetch as anon and miss
+      // personalization. This used to just return, leaving `loading` true from
+      // the initial state: with no user there was nothing left to clear it, so
+      // the section rendered its skeleton row permanently.
+      if (!user?.id) {
+        setLoading(false);
+        return;
+      }
       // Follow/unfollow handlers update the feed cache optimistically before
       // emitting followBus, so tab switches can keep using cached Following
       // data instead of re-fetching on every visit.
@@ -647,27 +782,37 @@ export function useUpcomingGames(options = {}) {
         sort,
       );
 
-      // If this is the first fetch after the user resolved and data is already preloaded, hydrate immediately
-      const cached = _getCached(key);
-      if (cached && !shouldBypassCache) {
-        if (!(cached.items.length < limit && cached.meta?.has_more)) {
-          if (cancelled || currentFetch !== fetchCounter.current) return;
-          const slice = cached.items.slice(0, limit);
-          setGames((prev) => {
-            const acc = _accumulateFromCache(user.id, feed, timeframe, page, date_from, date_to, sort, limit);
-            return acc ?? (page === 1 ? slice : [...prev, ...slice]);
-          });
-          setMeta(cached.meta);
-          if (page === 1) setFacets(cached.facets);
-          if (feed === "following") {
-            mergeCachedFollowedGames(user.id, slice);
-            setFollowedSet((prev) => new Set([...prev, ...slice.map((g) => followedGameKey(g.source, g.source_game_id))]));
-          }
+      // Paint whatever the cache holds before doing anything on the network.
+      // A fresh entry ends the work here; a stale one still goes on screen and
+      // the request below becomes a silent background refresh.
+      const renderable = _getRenderableCached(key);
+      const cached = renderable?.entry ?? null;
+      const cacheIsUsable =
+        cached && !shouldBypassCache && !(cached.items.length < limit && cached.meta?.has_more);
+
+      if (cacheIsUsable) {
+        if (cancelled || currentFetch !== fetchCounter.current) return;
+        const slice = cached.items.slice(0, limit);
+        setGames((prev) => {
+          const acc = _accumulateFromCache(user.id, feed, timeframe, page, date_from, date_to, sort, limit);
+          return acc ?? (page === 1 ? slice : [...prev, ...slice]);
+        });
+        setMeta(cached.meta);
+        if (page === 1) setFacets(cached.facets);
+        if (feed === "following") {
+          mergeCachedFollowedGames(user.id, slice);
+          setFollowedSet((prev) => new Set([...prev, ...slice.map((g) => followedGameKey(g.source, g.source_game_id))]));
+        }
+        setError(null);
+        lastFeedRef.current = feed;
+        hydratedForRef.current = user.id;
+
+        if (!renderable.stale) {
           setLoading(false);
-          lastFeedRef.current = feed;
-          hydratedForRef.current = user.id;
           return;
         }
+        // Stale: fall through and refresh. The rows already rendered above mean
+        // this shows as isRefetching, so the user never sees the skeleton.
       }
 
       // If a preload is in-flight for this key, wait for it instead of
@@ -675,7 +820,14 @@ export function useUpcomingGames(options = {}) {
       // preload and the moment the hook mounts.
       const inflight = _preloadInflight.get(key);
       if (inflight && !shouldBypassCache) {
-        await inflight;
+        // A wedged preload must not pin this row on its skeleton either — fall
+        // through to our own request if it hasn't landed in time.
+        try {
+          await withDeadline(inflight, FEED_REQUEST_TIMEOUT_MS, "feed preload");
+        } catch (err) {
+          if (import.meta.env.DEV)
+            console.warn("[useUpcomingGames] preload wait:", err?.message ?? err);
+        }
         if (cancelled || currentFetch !== fetchCounter.current) return;
         const preloaded = _getCached(key);
         if (preloaded && !(preloaded.items.length < limit && preloaded.meta?.has_more)) {
@@ -690,6 +842,7 @@ export function useUpcomingGames(options = {}) {
             mergeCachedFollowedGames(user.id, slice);
             setFollowedSet((prev) => new Set([...prev, ...slice.map((g) => followedGameKey(g.source, g.source_game_id))]));
           }
+          setError(null);
           setLoading(false);
           lastFeedRef.current = feed;
           hydratedForRef.current = user.id;
@@ -698,7 +851,7 @@ export function useUpcomingGames(options = {}) {
       }
 
       // New tab — show cached data instantly if available
-      if (lastFeedRef.current !== feed && page === 1) {
+      if (!cacheIsUsable && lastFeedRef.current !== feed && page === 1) {
         const freshCache = _getCached(key);
         if (freshCache && !shouldBypassCache) {
           setGames(freshCache.items.slice(0, limit));
@@ -709,6 +862,7 @@ export function useUpcomingGames(options = {}) {
           }
           // Only short-circuit if cache is sufficient (not a partial/synthetic entry)
           if (!(freshCache.items.length < limit && freshCache.meta?.has_more)) {
+            setError(null);
             setLoading(false);
             lastFeedRef.current = feed;
             return;
@@ -724,9 +878,8 @@ export function useUpcomingGames(options = {}) {
       setLoading(true);
       setError(null);
       try {
-        const { data, error: funcErr } = await supabase.functions.invoke(
-          "get-upcoming-feeds",
-          {
+        const { data, error: funcErr } = await withDeadline(
+          supabase.functions.invoke("get-upcoming-feeds", {
             body: {
               feed,
               timeframe,
@@ -736,7 +889,9 @@ export function useUpcomingGames(options = {}) {
               date_to,
               sort,
             },
-          },
+          }),
+          FEED_REQUEST_TIMEOUT_MS,
+          "get-upcoming-feeds",
         );
 
         if (funcErr) throw funcErr;
@@ -759,6 +914,9 @@ export function useUpcomingGames(options = {}) {
         setGames((prev) => (page === 1 ? slice : [...prev, ...slice]));
         setMeta(data.meta);
         if (page === 1) setFacets(data.facets);
+        // A previous attempt may have timed out and left the section on its
+        // error state; the data is here now, so that message has to go.
+        setError(null);
         hydratedForRef.current = user.id;
       } catch (err) {
         if (cancelled || currentFetch !== fetchCounter.current) return;
@@ -775,7 +933,7 @@ export function useUpcomingGames(options = {}) {
     return () => {
       cancelled = true;
     };
-  }, [feed, timeframe, page, limit, date_from, date_to, sort, user?.id, followVersion]);
+  }, [feed, timeframe, page, limit, date_from, date_to, sort, user?.id, followVersion, cacheVersion]);
 
   // ── Fetch followed games (user-specific) ─────────────────────────────────
   useEffect(() => {

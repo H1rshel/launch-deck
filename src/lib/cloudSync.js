@@ -15,6 +15,73 @@ import { getCloudGameId } from './cloudGameId'
 // Re-exported for existing importers
 export { getCloudGameId }
 
+// ── Concurrency guard ────────────────────────────────────────────────────────
+// Three independent callers can ask for a cloud sync at once: the login-time
+// effect, the 5-minute periodic effect, and the debounced push queued by any
+// local game edit. Each pass is a multi-query round trip over the whole
+// library, and the WebView allows only a handful of concurrent connections to
+// one origin — so overlapping runs don't just duplicate the work, they queue
+// behind each other and starve every OTHER Supabase call (the upcoming-feed
+// edge function included) for as long as they take.
+//
+// Collapsing duplicate in-flight runs onto one promise keeps the syncing
+// indicator honest too: it can only report the single run that is actually
+// happening, instead of a pile of overlapping start/end events.
+const _syncInflight = new Map()
+const _syncPending = new Map()
+
+function startSyncRun(key, userId, run) {
+  const promise = (async () => {
+    window.dispatchEvent(new CustomEvent('cloud-sync-start'))
+    try {
+      return await run(userId)
+    } finally {
+      window.dispatchEvent(new CustomEvent('cloud-sync-end'))
+      if (_syncInflight.get(key) === promise) _syncInflight.delete(key)
+    }
+  })()
+
+  _syncInflight.set(key, promise)
+  return promise
+}
+
+function coalesceSync(name, userId, run) {
+  const key = `${name}:${userId}`
+  const current = _syncInflight.get(key)
+  if (!current) return startSyncRun(key, userId, run)
+
+  // A run is already going — but it took its snapshot of the library before
+  // this caller asked, so simply handing back the running promise could drop
+  // the change that prompted the call (the debounced push after a game edit
+  // is exactly that case). Queue one follow-up run instead, and let every
+  // caller that arrives meanwhile share it: N overlapping requests collapse
+  // to at most one extra pass, and nothing gets skipped.
+  const queued = _syncPending.get(key)
+  if (queued) return queued
+
+  const follow = current
+    .catch(() => {})
+    .then(() => {
+      _syncPending.delete(key)
+      return startSyncRun(key, userId, run)
+    })
+
+  _syncPending.set(key, follow)
+  return follow
+}
+
+/** Force sync all local changes up to the cloud. Concurrent calls share one run. */
+export function syncLocalToCloud(userId) {
+  if (!userId) return Promise.resolve()
+  return coalesceSync('push', userId, syncLocalToCloudImpl)
+}
+
+/** Fetch all cloud changes and apply them locally. Concurrent calls share one run. */
+export function syncCloudToLocal(userId) {
+  if (!userId) return Promise.resolve({ added: 0 })
+  return coalesceSync('pull', userId, syncCloudToLocalImpl)
+}
+
 let gamesTableSupportsUbisoftId = null
 
 // Customization columns added by the 2026-07 streaming/multi-PC migration.
@@ -282,10 +349,9 @@ export async function initialSync(userId) {
 /**
  * Force sync all local changes up to the cloud.
  */
-export async function syncLocalToCloud(userId) {
+async function syncLocalToCloudImpl(userId) {
   if (!userId) return
 
-  window.dispatchEvent(new CustomEvent('cloud-sync-start'))
   try {
     // Fetch the comparison columns (cover for the image backfill, favorite as
     // a "customization columns ever synced?" probe). Falls back to the legacy
@@ -405,8 +471,6 @@ export async function syncLocalToCloud(userId) {
   await tasteProfileService.buildAndUpsertTasteProfile(userId)
 } catch (err) {
   console.error('syncLocalToCloud: Error', err)
-} finally {
-  window.dispatchEvent(new CustomEvent('cloud-sync-end'))
 }
 }
 
@@ -496,12 +560,11 @@ function findLocalMatch(cg, combinedLocalGames, localByNormTitle) {
 /**
  * Fetch all cloud changes and apply them locally if newer.
  */
-export async function syncCloudToLocal(userId) {
+async function syncCloudToLocalImpl(userId) {
   if (!userId) return { added: 0 }
   
   let addedCount = 0
 
-  window.dispatchEvent(new CustomEvent('cloud-sync-start'))
   try {
     // Two-step fetch instead of `select('*')`. The reconcile loop below only
     // needs six narrow columns to DECIDE what to do with a row — the wide
@@ -734,8 +797,6 @@ export async function syncCloudToLocal(userId) {
   return { added: addedCount }
 } catch (err) {
   console.error("Cloud Sync Error", err)
-} finally {
-  window.dispatchEvent(new CustomEvent('cloud-sync-end'))
 }
 }
 

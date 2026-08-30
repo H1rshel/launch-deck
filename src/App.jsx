@@ -45,16 +45,22 @@ export default function App() {
 
   // Fire off the preloader the moment we have a known user, so that tabs are fully
   // populated in the background before the user even clicks to go to the page.
+  // Keyed on the user ID, not the user object: AuthProvider replaces the object
+  // on every auth event (the initial session, the background reconcile, each
+  // token refresh), and depending on it re-ran both preloads every time one
+  // arrived — extra Supabase round trips competing with the very requests the
+  // dashboard was waiting on.
+  const preloadUserId = user?.id
   useEffect(() => {
-    if (!authLoading && user) {
+    if (!authLoading && preloadUserId) {
       const TAB_TO_FEED = { forYou: 'for_you', following: 'following', soon: 'soon', recent: 'recent', big: 'big_releases', popular: 'popular' };
       const savedTab = sessionStorage.getItem('upcoming_tab') || 'forYou';
       const activeFeed = TAB_TO_FEED[savedTab] || 'for_you';
-      preloadUpcomingFeeds(user.id, activeFeed)
+      preloadUpcomingFeeds(preloadUserId, activeFeed).catch(() => {})
       const discoverTab = sessionStorage.getItem('discover_tab') || 'for_you'
-      preloadDiscoverFeeds(user.id, discoverTab)
+      preloadDiscoverFeeds(preloadUserId, discoverTab)
     }
-  }, [authLoading, user])
+  }, [authLoading, preloadUserId])
 
   // Close the native Tauri splash screen once React is ready. The fallback keeps
   // the installed app usable if one startup service gets stuck.

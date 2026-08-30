@@ -87,19 +87,49 @@ const isTauri =
 let db = null
 let dbReady = false
 
+// Both of the memoized promises below exist because these are now entered
+// concurrently: the feed cache reads app_meta as soon as its module loads,
+// while GameProvider is running initDb(). Keying off the resolved value alone
+// let two callers past the guard at once — two SQL.default.load() calls, and
+// worse, two runs of the ~45 sequential CREATE/ALTER round trips in
+// ensureTablesExist(), doubling that cost right at startup.
+let dbLoading = null
+
 async function getDb() {
   if (db) return db
-  const SQL = await import("@tauri-apps/plugin-sql")
-  db = await SQL.default.load("sqlite:launchdeck.db")
-  return db
+  if (!dbLoading) {
+    dbLoading = (async () => {
+      const SQL = await import("@tauri-apps/plugin-sql")
+      db = await SQL.default.load("sqlite:launchdeck.db")
+      return db
+    })().catch((err) => {
+      // Don't cache a failed load — the next caller should be able to retry.
+      dbLoading = null
+      throw err
+    })
+  }
+  return dbLoading
 }
 
 // Bump this whenever a new CREATE/ALTER is added below, so the one-time
 // migration runs once more and then the fast path resumes.
 const SCHEMA_VERSION = 3
 
-// Ensures tables exist before any query — safe to call multiple times
+// Ensures tables exist before any query — safe to call multiple times, and
+// safe to call concurrently: overlapping callers share one run.
+let tablesReadyPromise = null
 async function ensureTablesExist() {
+  if (dbReady) return
+  if (!tablesReadyPromise) {
+    tablesReadyPromise = ensureTablesExistOnce().catch((err) => {
+      tablesReadyPromise = null
+      throw err
+    })
+  }
+  return tablesReadyPromise
+}
+
+async function ensureTablesExistOnce() {
   if (dbReady) return
   const conn = await getDb()
 
