@@ -10,6 +10,19 @@ const isTauri =
 export const DEVICE_ONLINE_WINDOW_MS = 3 * 60 * 1000
 const HEARTBEAT_INTERVAL_MS = 60 * 1000
 
+// A device counts as a live peer — one that could plausibly send this PC a
+// command — when it has beaten within this window. Deliberately much wider
+// than DEVICE_ONLINE_WINDOW_MS: it decides whether to hold open the Realtime
+// subscription, and flapping that on a 3-minute edge would tear the channel
+// down and rebuild it all day. See hasLivePeer() for why this matters.
+export const DEVICE_PEER_WINDOW_MS = 15 * 60 * 1000
+
+// A registration older than this is a dead install — a reformatted PC, an
+// uninstall, a machine that changed its GUID. It is pruned on sight. Nothing
+// is lost: a device that comes back re-registers on launch and re-uploads its
+// install map.
+const DEVICE_STALE_MS = 30 * 24 * 60 * 60 * 1000
+
 const DEVICE_ID_KEY = 'device_id'
 const INSTALL_MAP_HASH_KEY = 'install_map_hash'
 
@@ -201,6 +214,62 @@ export function stopHeartbeat() {
 export function isDeviceOnline(device) {
   if (!device?.last_seen) return false
   return Date.now() - new Date(device.last_seen).getTime() < DEVICE_ONLINE_WINDOW_MS
+}
+
+/**
+ * Is any device OTHER than this one plausibly running right now?
+ *
+ * This is the gate on the Realtime subscription, and it is the single most
+ * expensive boolean in the app. Opening a postgres_changes channel makes
+ * Supabase's WAL poller (realtime.list_changes) run continuously for the
+ * tenant, decoding every WAL record whether or not anything matches —
+ * measured on this project at ~1.75 calls/s, ~151k/day, 50.9% of ALL database
+ * execution time and the dominant consumer of the Disk IO budget.
+ *
+ * The predicate this replaced was `devices.some(d => d.device_id !== mine)`,
+ * which counted a laptop last seen 51 days earlier and so held the channel
+ * open forever on a single-PC account. Liveness, not existence, is what makes
+ * a peer able to send a command.
+ */
+export function hasLivePeer(devices, thisDeviceId) {
+  const now = Date.now()
+  return (devices || []).some(
+    (d) =>
+      d.device_id !== thisDeviceId &&
+      d.last_seen &&
+      now - new Date(d.last_seen).getTime() < DEVICE_PEER_WINDOW_MS,
+  )
+}
+
+// Devices this session has already tried to prune. The caller runs on a 60s
+// timer, and without this a delete that keeps failing (RLS, offline) would be
+// retried forever — the exact kind of idle request loop this whole change
+// exists to remove.
+const prunedDevices = new Set()
+
+/**
+ * Drop registrations that have not been heard from in DEVICE_STALE_MS. Best
+ * effort and fire-and-forget: a dead row costs a little Realtime and clutters
+ * the device list, but failing to remove it is not an error worth surfacing.
+ */
+export async function pruneStaleDevices(userId, devices, thisDeviceId) {
+  if (!userId) return
+  const cutoff = Date.now() - DEVICE_STALE_MS
+  const dead = (devices || []).filter(
+    (d) =>
+      d.device_id !== thisDeviceId &&
+      d.last_seen &&
+      new Date(d.last_seen).getTime() < cutoff &&
+      !prunedDevices.has(d.device_id),
+  )
+  for (const d of dead) {
+    prunedDevices.add(d.device_id)
+    try {
+      await removeDevice(userId, d.device_id)
+    } catch (err) {
+      console.debug('Stale device prune failed:', err?.message)
+    }
+  }
 }
 
 /** All devices registered to the user (this PC included), newest-seen first. */

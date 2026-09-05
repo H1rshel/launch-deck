@@ -9,7 +9,13 @@ import {
 import { useAuth } from './AuthContext'
 import { useNotifications } from './NotificationContext'
 import { getCloudGameId } from '../lib/cloudSync'
-import { getDeviceId, getStreamSourceMap, getUserDevices } from '../lib/devices'
+import {
+  getDeviceId,
+  getStreamSourceMap,
+  getUserDevices,
+  hasLivePeer,
+  pruneStaleDevices,
+} from '../lib/devices'
 import { startCommandListener } from '../lib/streaming/commandBus'
 import { createHostHandlers } from '../lib/streaming/streamingHost'
 import { streamGame, cancelStream } from '../lib/streaming/streamingClient'
@@ -38,11 +44,12 @@ export function StreamingProvider({ children }) {
   // { game, host, phase: 'provisioning'|'pairing'|'preparing'|'streaming', percent? }
   const [streamingSession, setStreamingSession] = useState(null)
   const streamingRef = useRef(false)
-  // How many devices other than this one are registered to the account. Only
-  // those can ever send this PC a command, and the Realtime subscription that
+  // Is another device of this account actually alive right now? Only a live
+  // peer can ever send this PC a command, and the Realtime subscription that
   // receives them is the project's single biggest database cost — so it is
-  // only opened once a second device actually exists.
-  const [hasOtherDevices, setHasOtherDevices] = useState(false)
+  // only opened while such a peer exists. Existence alone is not enough: a
+  // long-dead registration used to hold the channel open forever.
+  const [hasPeer, setHasPeer] = useState(false)
 
   const refreshStreamSources = useCallback(async () => {
     if (!user?.id) {
@@ -51,7 +58,10 @@ export function StreamingProvider({ children }) {
     }
     const devices = await getUserDevices(user.id)
     const thisDeviceId = await getDeviceId()
-    setHasOtherDevices(devices.some((d) => d.device_id !== thisDeviceId))
+    setHasPeer(hasLivePeer(devices, thisDeviceId))
+    // Cheap to do here: this is the one place that already holds the full
+    // device list on a timer.
+    pruneStaleDevices(user.id, devices, thisDeviceId)
 
     const map = await getStreamSourceMap(user.id)
     // Keep the previous Map identity when nothing changed — GameCard is
@@ -114,7 +124,7 @@ export function StreamingProvider({ children }) {
           user.id,
           deviceId,
           createHostHandlers({ userId: user.id, notify: addNotification }),
-          { realtime: hasOtherDevices },
+          { realtime: hasPeer },
         )
       } catch (err) {
         console.warn('Could not start streaming command listener:', err?.message)
@@ -124,7 +134,7 @@ export function StreamingProvider({ children }) {
       cancelled = true
       if (stop) stop()
     }
-  }, [user?.id, hasOtherDevices]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id, hasPeer]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Best host for a game that is NOT installed locally, or null.
