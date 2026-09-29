@@ -6,6 +6,13 @@
  * get hold-to-repeat with an initial delay (DAS-style), every other
  * button fires on the pressed edge only.
  *
+ * Sampling is throttled to MIN_SAMPLE_INTERVAL_MS and suspended entirely
+ * while the document is hidden. rAF runs at the display refresh rate, so on
+ * a 240Hz panel an ungated loop makes 240 navigator.getGamepads() device
+ * enumerations a second — and keeps making them while the window merely
+ * sits behind another one, because WebView2 only throttles rAF for a
+ * minimised window, not an occluded one.
+ *
  * Semantic actions:
  *   up, down, left, right    — d-pad 12-15 or left stick
  *   accept (A/Cross)         — button 0
@@ -36,6 +43,11 @@ const DIRECTION_BUTTONS = { 12: 'up', 13: 'down', 14: 'left', 15: 'right' }
 const STICK_DEADZONE = 0.5
 const REPEAT_INITIAL_MS = 380
 const REPEAT_INTERVAL_MS = 125
+
+// Minimum gap between real pad reads (~125Hz). Still 15x faster than
+// REPEAT_INTERVAL_MS, so edge detection and hold-to-repeat behave
+// identically, but the cost stops scaling with the monitor's refresh rate.
+const MIN_SAMPLE_INTERVAL_MS = 8
 
 /** Best-effort controller family from the gamepad id string. */
 export function detectPadType(id = '') {
@@ -71,23 +83,63 @@ export class GamepadEngine {
     this.dirState = { up: null, down: null, left: null, right: null } // { since, lastFire }
     this.connected = false
     this.padType = null
+    this._lastSample = 0
+    // Set when resuming from hidden: re-read the held state without emitting,
+    // so a button held across the pause cannot fire a phantom edge.
+    this._needsBaseline = false
     this._poll = this._poll.bind(this)
+    this._onVisibility = this._onVisibility.bind(this)
   }
 
   start() {
-    if (this.rafId == null) this.rafId = requestAnimationFrame(this._poll)
+    if (this.rafId != null) return
+    document.addEventListener('visibilitychange', this._onVisibility)
+    if (!document.hidden) this.rafId = requestAnimationFrame(this._poll)
   }
 
   stop() {
+    document.removeEventListener('visibilitychange', this._onVisibility)
     if (this.rafId != null) cancelAnimationFrame(this.rafId)
     this.rafId = null
     this.prevPressed = {}
     this.dirState = { up: null, down: null, left: null, right: null }
+    this._needsBaseline = false
   }
 
-  _poll() {
-    const pads = navigator.getGamepads?.() ?? []
-    const pad = Array.from(pads).find((p) => p?.connected)
+  /** Suspend polling while hidden; resume and re-baseline when shown again. */
+  _onVisibility() {
+    if (document.hidden) {
+      if (this.rafId != null) cancelAnimationFrame(this.rafId)
+      this.rafId = null
+      return
+    }
+    if (this.rafId == null) {
+      this._needsBaseline = true
+      this._lastSample = 0
+      this.rafId = requestAnimationFrame(this._poll)
+    }
+  }
+
+  _poll(ts) {
+    // rAF itself is cheap; navigator.getGamepads() is not, so gate the read.
+    if (ts - this._lastSample < MIN_SAMPLE_INTERVAL_MS) {
+      this.rafId = requestAnimationFrame(this._poll)
+      return
+    }
+    this._lastSample = ts
+
+    // Indexed scan instead of Array.from(...).find(...): this runs ~125x a
+    // second and the intermediate array was pure GC churn.
+    const pads = navigator.getGamepads?.()
+    let pad = null
+    if (pads) {
+      for (let i = 0; i < pads.length; i++) {
+        if (pads[i]?.connected) {
+          pad = pads[i]
+          break
+        }
+      }
+    }
 
     if (pad) {
       if (!this.connected) {
@@ -97,6 +149,10 @@ export class GamepadEngine {
         // Baseline whatever is already held (e.g. the Start press that
         // entered Console Mode) so it can't fire as a fresh edge.
         this._baseline(pad)
+        this._needsBaseline = false
+      } else if (this._needsBaseline) {
+        this._baseline(pad)
+        this._needsBaseline = false
       } else {
         this._readPad(pad)
       }
@@ -105,6 +161,7 @@ export class GamepadEngine {
       this.padType = null
       this.prevPressed = {}
       this.dirState = { up: null, down: null, left: null, right: null }
+      this._needsBaseline = false
       this.onConnectionChange?.({ connected: false, padType: null })
     }
 
