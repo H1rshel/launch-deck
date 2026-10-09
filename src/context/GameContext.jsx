@@ -960,6 +960,11 @@ export function GameProvider({ children }) {
 
       if (!liveIntervalRef.current) {
         liveIntervalRef.current = setInterval(() => {
+          // The counter is derived from the start time, so skipping ticks
+          // loses nothing — and while the game itself has focus, nobody is
+          // looking at it. Each tick re-renders every GameContext consumer,
+          // which is exactly the work not to do mid-game.
+          if (document.hidden || !document.hasFocus()) return;
           setLiveElapsed(() => {
             const next = {};
             for (const [id, start] of sessionStartsRef.current) {

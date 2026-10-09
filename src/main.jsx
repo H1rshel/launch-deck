@@ -8,7 +8,9 @@ import { StreamingProvider } from './context/StreamingContext'
 import { NotificationProvider } from './context/NotificationContext'
 import App from './App'
 import AppErrorBoundary, { StartupRecoveryScreen } from './components/ui/AppErrorBoundary'
+import { installWindowActivityTracking } from './lib/windowActivity'
 import './styles/global.css'
+import './styles/inactive.css'
 
 const rootElement = document.getElementById('root')
 let appMounted = false
@@ -45,6 +47,8 @@ setTimeout(() => {
 // Moonlight handoff. Desktop keeps the full app.
 const IS_ANDROID = /android/i.test(navigator.userAgent)
 const MobileApp = IS_ANDROID ? React.lazy(() => import('./mobile/MobileApp')) : null
+
+if (!IS_ANDROID) installWindowActivityTracking()
 
 root.render(
   <React.StrictMode>

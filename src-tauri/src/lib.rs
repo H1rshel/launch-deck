@@ -31,9 +31,27 @@ fn show_main_window(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
+        set_webview_visible(&win, true);
         let _ = win.set_focus();
     }
 }
+
+/// Tell WebView2 whether its page can be seen. Hiding the native window (close
+/// to tray) does not do this on its own: the page keeps reporting
+/// `document.hidden === false` and runs every CSS animation, rAF loop and
+/// compositor frame at full rate — measured at ~0.85 of a CPU core plus GPU
+/// work, around the clock, for a window nobody could see. Marking the
+/// controller invisible lets Chromium suspend rendering and throttle timers
+/// exactly as it does for a background tab.
+#[cfg(target_os = "windows")]
+fn set_webview_visible(win: &tauri::WebviewWindow, visible: bool) {
+    let _ = win.with_webview(move |webview| unsafe {
+        let _ = webview.controller().SetIsVisible(visible);
+    });
+}
+
+#[cfg(all(desktop, not(target_os = "windows")))]
+fn set_webview_visible(_win: &tauri::WebviewWindow, _visible: bool) {}
 use tauri::Emitter;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
@@ -7132,11 +7150,31 @@ pub fn run() {
             // hide it instead of quitting. This also covers the custom titlebar
             // close button, which calls window.close() (→ CloseRequested).
             if window.label() == "main" {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    if CLOSE_TO_TRAY.load(Ordering::Relaxed) {
-                        api.prevent_close();
-                        let _ = window.hide();
+                #[cfg(desktop)]
+                use tauri::Manager;
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        if CLOSE_TO_TRAY.load(Ordering::Relaxed) {
+                            api.prevent_close();
+                            let _ = window.hide();
+                            #[cfg(desktop)]
+                            if let Some(win) = window.app_handle().get_webview_window("main") {
+                                set_webview_visible(&win, false);
+                            }
+                        }
                     }
+                    // Minimise also stops the page rendering. Restore — and any
+                    // focus, which can only happen to a visible window — turns
+                    // it back on, so no show path can leave the page frozen.
+                    #[cfg(desktop)]
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(true) => {
+                        if let Some(win) = window.app_handle().get_webview_window("main") {
+                            let minimized = win.is_minimized().unwrap_or(false);
+                            let visible = win.is_visible().unwrap_or(true);
+                            set_webview_visible(&win, visible && !minimized);
+                        }
+                    }
+                    _ => {}
                 }
             }
         })

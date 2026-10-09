@@ -6,15 +6,25 @@ const isTauri =
   typeof window !== 'undefined' &&
   !!(window.__TAURI_INTERNALS__ || window.__TAURI__)
 
-// A device is "online" when its heartbeat is fresher than this.
-export const DEVICE_ONLINE_WINDOW_MS = 3 * 60 * 1000
-const HEARTBEAT_INTERVAL_MS = 60 * 1000
+// A device is "online" when its heartbeat is fresher than this: two missed
+// beats plus slack for timer throttling in a hidden window.
+export const DEVICE_ONLINE_WINDOW_MS = 11 * 60 * 1000
+
+// Every heartbeat is a database write, and on this project any write inside a
+// 2-minute window makes Postgres close and archive a whole 16 MB WAL segment
+// (archive_timeout = 2min, for point-in-time backups). A 60s beat put a write
+// in every window, so an idle PC sitting in the tray forced ~720 segment
+// archives a day — the bulk of the Disk IO budget. Five minutes keeps a PC's
+// presence fresh enough for "stream from this PC" while letting most windows
+// pass with no write at all.
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000
 
 // A device counts as a live peer — one that could plausibly send this PC a
-// command — when it has beaten within this window. Deliberately much wider
-// than DEVICE_ONLINE_WINDOW_MS: it decides whether to hold open the Realtime
-// subscription, and flapping that on a 3-minute edge would tear the channel
-// down and rebuild it all day. See hasLivePeer() for why this matters.
+// command — when it has beaten within this window. Deliberately wider than
+// DEVICE_ONLINE_WINDOW_MS (three full heartbeats): it decides whether to hold
+// open the Realtime subscription, and flapping that on a tight edge would tear
+// the channel down and rebuild it all day. See hasLivePeer() for why this
+// matters.
 export const DEVICE_PEER_WINDOW_MS = 15 * 60 * 1000
 
 // A registration older than this is a dead install — a reformatted PC, an

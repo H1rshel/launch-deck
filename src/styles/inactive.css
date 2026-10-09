@@ -1,0 +1,7 @@
+/* See src/lib/windowActivity.js — the window is behind another app (usually a
+   game), so nothing here is being looked at. */
+.app-inactive *,
+.app-inactive *::before,
+.app-inactive *::after {
+  animation-play-state: paused !important;
+}

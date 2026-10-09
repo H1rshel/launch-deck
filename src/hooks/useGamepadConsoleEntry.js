@@ -32,8 +32,18 @@ export function useGamepadConsoleEntry() {
   useEffect(() => {
     // A cheap 140ms poll: one getGamepads() call and a single button check.
     const id = setInterval(() => {
-      const pad = Array.from(navigator.getGamepads?.() ?? []).find((p) => p?.connected)
       const s = stateRef.current
+
+      // The pad belongs to whatever has focus. Without this, pressing Start to
+      // pause a game flipped the hidden Launch Deck into fullscreen Console
+      // Mode behind it. Treat Start as held while away, so a press that is
+      // still down when focus returns can't fire as a fresh edge.
+      if (document.hidden || !document.hasFocus()) {
+        s.prevStart = true
+        return
+      }
+
+      const pad = Array.from(navigator.getGamepads?.() ?? []).find((p) => p?.connected)
 
       if (!pad) {
         if (s.wasConnected) {

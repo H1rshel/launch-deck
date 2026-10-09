@@ -7,7 +7,8 @@
  * button fires on the pressed edge only.
  *
  * Sampling is throttled to MIN_SAMPLE_INTERVAL_MS and suspended entirely
- * while the document is hidden. rAF runs at the display refresh rate, so on
+ * while the document is hidden or the window is unfocused (see _isActive).
+ * rAF runs at the display refresh rate, so on
  * a 240Hz panel an ungated loop makes 240 navigator.getGamepads() device
  * enumerations a second — and keeps making them while the window merely
  * sits behind another one, because WebView2 only throttles rAF for a
@@ -94,11 +95,15 @@ export class GamepadEngine {
   start() {
     if (this.rafId != null) return
     document.addEventListener('visibilitychange', this._onVisibility)
-    if (!document.hidden) this.rafId = requestAnimationFrame(this._poll)
+    window.addEventListener('focus', this._onVisibility)
+    window.addEventListener('blur', this._onVisibility)
+    if (this._isActive()) this.rafId = requestAnimationFrame(this._poll)
   }
 
   stop() {
     document.removeEventListener('visibilitychange', this._onVisibility)
+    window.removeEventListener('focus', this._onVisibility)
+    window.removeEventListener('blur', this._onVisibility)
     if (this.rafId != null) cancelAnimationFrame(this.rafId)
     this.rafId = null
     this.prevPressed = {}
@@ -106,9 +111,19 @@ export class GamepadEngine {
     this._needsBaseline = false
   }
 
-  /** Suspend polling while hidden; resume and re-baseline when shown again. */
+  /**
+   * The pad belongs to whichever window has focus. A game launched from
+   * Console Mode runs in front of this (still visible, fullscreen) window, so
+   * without the focus check every in-game A press also landed here — and A
+   * on a tile launches it.
+   */
+  _isActive() {
+    return !document.hidden && document.hasFocus()
+  }
+
+  /** Suspend polling while hidden or unfocused; re-baseline on return. */
   _onVisibility() {
-    if (document.hidden) {
+    if (!this._isActive()) {
       if (this.rafId != null) cancelAnimationFrame(this.rafId)
       this.rafId = null
       return
