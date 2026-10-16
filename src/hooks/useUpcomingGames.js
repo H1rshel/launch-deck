@@ -459,6 +459,13 @@ const ALL_FEEDS = ["for_you", "following", "soon", "recent", "big_releases", "po
 // the next render can retry, never an indefinite skeleton.
 const FEED_REQUEST_TIMEOUT_MS = 20_000;
 
+// After an error the row retries on its own a few times, backing off, and
+// again whenever the window comes back into view. Before this an error was
+// terminal for the session: nothing re-ran the fetch until the user switched
+// tabs, so one slow cold start (the whole app's startup burst contending for
+// the same project) left "Could not load upcoming games." up indefinitely.
+const FEED_RETRY_DELAYS_MS = [10_000, 30_000, 90_000];
+
 function withDeadline(promise, ms, what) {
   let timer;
   return Promise.race([
@@ -475,6 +482,29 @@ function withDeadline(promise, ms, what) {
 // In-flight preload promises keyed by cache key. Lets the useUpcomingGames
 // effect await an already-running preload instead of firing a duplicate call.
 const _preloadInflight = new Map();
+
+// The hook's own requests, by cache key. The deadline above only stops the
+// hook WAITING — the request itself carries on, and it used to be thrown away
+// when it landed, so a response that took 25s was discarded and the row stayed
+// on its error. Now the response is cached whoever is listening, and an effect
+// re-run joins the request already on the wire instead of firing another.
+const _feedRequests = new Map();
+
+function _requestFeed(key, body) {
+  const existing = _feedRequests.get(key);
+  if (existing) return existing;
+  const request = supabase.functions
+    .invoke("get-upcoming-feeds", { body })
+    .then(({ data, error }) => {
+      if (error) throw error;
+      if (!data || data.error) throw new Error(data?.error || "Empty response");
+      _setCache(key, { items: data.items, meta: data.meta, facets: data.facets });
+      return data;
+    })
+    .finally(() => _feedRequests.delete(key));
+  _feedRequests.set(key, request);
+  return request;
+}
 
 /**
  * Pre-warm the cache by fetching each feed individually.
@@ -539,6 +569,7 @@ async function _preloadUpcomingFeeds(userId, activeFeed) {
         if (feedName === "following") {
           mergeCachedFollowedGames(userId, data.items);
         }
+        _bumpCacheVersion();
       } catch (e) {
         if (import.meta.env.DEV)
           console.warn("[useUpcomingFeeds] preload failed for", feedName, ":", e);
@@ -636,6 +667,10 @@ async function _preloadAllFeeds(userId, timeframe, sort) {
           mergeCachedFollowedGames(userId, entry.items);
         }
       }
+      // A hook that already gave up on this preload (its wait has a deadline,
+      // this request does not) is sitting on an error or a stale copy, and
+      // nothing else would tell it the data is now here.
+      if (seeded > 0) _bumpCacheVersion();
       return seeded > 0;
     } catch (e) {
       if (import.meta.env.DEV)
@@ -743,6 +778,42 @@ export function useUpcomingGames(options = {}) {
   const [cacheVersion, setCacheVersion] = useState(() => getFeedCacheVersion());
   useEffect(() => subscribeToFeedCache(setCacheVersion), []);
 
+  // Consecutive failed fetches, and a nonce bumped to re-run the fetch after
+  // one (see FEED_RETRY_DELAYS_MS).
+  const [failures, setFailures] = useState(0);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const retryAttempt = useRef(0);
+  useEffect(() => {
+    if (!failures) return;
+    const retry = () => setRetryNonce((n) => n + 1);
+    const delay = FEED_RETRY_DELAYS_MS[retryAttempt.current];
+    const timer =
+      delay == null
+        ? null
+        : setTimeout(() => {
+            retryAttempt.current += 1;
+            retry();
+          }, delay);
+    // Coming back to the window is the moment the row is looked at again, and
+    // (since v0.1.86 hides the WebView in the tray) often the first moment its
+    // timers and network get to run at full speed.
+    const onVisible = () => {
+      if (!document.hidden) retry();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [failures]);
+
+  // What is on screen right now, read from inside the async fetch: a failed
+  // refresh must not swap rows the user can already see for an error message.
+  const gamesShownRef = useRef(0);
+  gamesShownRef.current = games.length;
+
   const followedSetFetchId = useRef(0);
   const pendingToggles = useRef(new Set());
   const optimisticFollowOverrides = useRef(new Map());
@@ -809,6 +880,7 @@ export function useUpcomingGames(options = {}) {
 
         if (!renderable.stale) {
           setLoading(false);
+          setFailures(0);
           return;
         }
         // Stale: fall through and refresh. The rows already rendered above mean
@@ -844,6 +916,7 @@ export function useUpcomingGames(options = {}) {
           }
           setError(null);
           setLoading(false);
+          setFailures(0);
           lastFeedRef.current = feed;
           hydratedForRef.current = user.id;
           return;
@@ -864,6 +937,7 @@ export function useUpcomingGames(options = {}) {
           if (!(freshCache.items.length < limit && freshCache.meta?.has_more)) {
             setError(null);
             setLoading(false);
+            setFailures(0);
             lastFeedRef.current = feed;
             return;
           }
@@ -877,34 +951,25 @@ export function useUpcomingGames(options = {}) {
 
       setLoading(true);
       setError(null);
+      const request = _requestFeed(key, {
+        feed,
+        timeframe,
+        page,
+        page_size: Math.max(limit, 48),
+        date_from,
+        date_to,
+        sort,
+      });
       try {
-        const { data, error: funcErr } = await withDeadline(
-          supabase.functions.invoke("get-upcoming-feeds", {
-            body: {
-              feed,
-              timeframe,
-              page,
-              page_size: Math.max(limit, 48),
-              date_from,
-              date_to,
-              sort,
-            },
-          }),
+        const data = await withDeadline(
+          request,
           FEED_REQUEST_TIMEOUT_MS,
           "get-upcoming-feeds",
         );
 
-        if (funcErr) throw funcErr;
-        if (!data || data.error)
-          throw new Error(data?.error || "Empty response");
-
         if (cancelled || currentFetch !== fetchCounter.current) return;
-
-        _setCache(key, {
-          items: data.items,
-          meta: data.meta,
-          facets: data.facets,
-        });
+        retryAttempt.current = 0;
+        setFailures(0);
 
         const slice = data.items.slice(0, limit);
         if (feed === "following") {
@@ -919,10 +984,15 @@ export function useUpcomingGames(options = {}) {
         setError(null);
         hydratedForRef.current = user.id;
       } catch (err) {
+        // Only the deadline gave up; the request may still succeed. When it
+        // does it is already cached, so wake the hook to paint it.
+        request.then(() => _bumpCacheVersion(), () => {});
         if (cancelled || currentFetch !== fetchCounter.current) return;
-        if (import.meta.env.DEV)
-          console.warn("[useUpcomingGames] fetch error:", err);
-        setError(err?.message ?? String(err));
+        console.warn("[useUpcomingGames] fetch error:", err?.message ?? err);
+        // A stale copy painted from cache is better than an error message.
+        // Keep it, and let the retry below try the refresh again.
+        if (gamesShownRef.current === 0) setError(err?.message ?? String(err));
+        setFailures((n) => n + 1);
       } finally {
         if (!cancelled && currentFetch === fetchCounter.current)
           setLoading(false);
@@ -933,7 +1003,7 @@ export function useUpcomingGames(options = {}) {
     return () => {
       cancelled = true;
     };
-  }, [feed, timeframe, page, limit, date_from, date_to, sort, user?.id, followVersion, cacheVersion]);
+  }, [feed, timeframe, page, limit, date_from, date_to, sort, user?.id, followVersion, cacheVersion, retryNonce]);
 
   // ── Fetch followed games (user-specific) ─────────────────────────────────
   useEffect(() => {
