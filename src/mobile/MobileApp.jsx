@@ -2,7 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth, _authBridge } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getDeviceId, getUserDevices, isDeviceOnline, getStreamSourceMap } from '../lib/devices'
-import { sendCommand } from '../lib/streaming/commandBus'
+import { sendCommand, postCommand } from '../lib/streaming/commandBus'
+
+// How often an open, visible Remote re-announces itself to each online PC.
+// Inside the host's 15-minute active window, so a Remote left open on the
+// stand keeps the PC listening tightly, and a backgrounded one lets it relax.
+const HELLO_INTERVAL_MS = 10 * 60 * 1000
 import { initDeepLinkHandler, recheckDeepLink } from '../services/deepLinkHandler'
 import { logAuth } from '../lib/authDebug'
 import {
@@ -145,7 +150,11 @@ export default function MobileApp() {
   useEffect(() => {
     if (!user?.id) return undefined
     refresh()
-    const timer = setInterval(refresh, 60_000)
+    // Nobody is looking at a backgrounded Remote; the visibility handler below
+    // catches it up the moment it comes back.
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') refresh()
+    }, 60_000)
     const onVisible = () => document.visibilityState === 'visible' && refresh()
     document.addEventListener('visibilitychange', onVisible)
     return () => {
@@ -240,6 +249,26 @@ export default function MobileApp() {
     }
   }, [onlineHosts])
 
+  // ── Hello: tell online PCs a Remote is open ──
+  // An idle PC only checks for commands once a minute. Announcing ourselves on
+  // open (onlineHosts lands with the first refresh) puts it on its 5-second
+  // sweep before the first tap, instead of making that tap wait up to a minute.
+  const lastHelloRef = useRef(new Map())
+  useEffect(() => {
+    if (!user?.id || document.visibilityState !== 'visible') return
+    const now = Date.now()
+    const due = onlineHosts.filter(
+      (h) => now - (lastHelloRef.current.get(h.device_id) || 0) >= HELLO_INTERVAL_MS,
+    )
+    if (due.length === 0) return
+    for (const h of due) lastHelloRef.current.set(h.device_id, now)
+    getDeviceId()
+      .then((myId) =>
+        Promise.all(due.map((h) => postCommand(user.id, myId, h.device_id, 'remote_hello'))),
+      )
+      .catch((e) => logAuth('hello ERR', String(e?.message).slice(0, 50)))
+  }, [user?.id, onlineHosts])
+
   // ── In-app updates: check GitHub releases against the installed version ──
   const [update, setUpdate] = useState(null) // { version, url } | null
   const [updating, setUpdating] = useState(null) // { pct } | null
@@ -290,7 +319,9 @@ export default function MobileApp() {
           source.deviceId,
           'prepare_stream',
           { gameId: game.game_id },
-          { timeoutMs: 45_000 },
+          // Covers a PC still on its once-a-minute idle sweep, should the tap
+          // beat the hello sent when the Remote opened.
+          { timeoutMs: 90_000 },
         )
         if (isNativeShell()) {
           // Headless engine — overlay stays until stream-started/error event

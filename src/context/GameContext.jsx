@@ -61,6 +61,14 @@ import { applyCachedFollowChange, gameKey as followedGameKey } from "../lib/foll
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
+// The periodic cloud pull+push. Its only job is to land changes made on
+// another device, which a single-PC account never has, and every tick is
+// three Supabase requests that each page the Nano instance's swapped-out
+// services back in. Coming back to the window catches up sooner (see
+// CLOUD_SYNC_FOCUS_MIN_MS), which is when a change from elsewhere matters.
+const CLOUD_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+const CLOUD_SYNC_FOCUS_MIN_MS = 5 * 60 * 1000;
+
 // Upper bound on how long the header may claim a cloud sync is running. A real
 // sync is well under this even on a slow link with a large library; past it the
 // indicator is lying to the user, whatever the underlying request is doing.
@@ -666,20 +674,32 @@ export function GameProvider({ children }) {
   useEffect(() => {
     if (!user || loading) return undefined;
     let cancelled = false;
+    let running = false;
+    // The login-time sync below has just run; count from there.
+    let lastRunAt = Date.now();
     const tick = async () => {
-      if (cancelled) return;
+      if (cancelled || running) return;
+      running = true;
+      lastRunAt = Date.now();
       try {
         await syncCloudToLocal(user.id);
         await syncLocalToCloud(user.id);
         if (!cancelled) await refreshGames();
       } catch (err) {
         console.debug("Periodic cloud sync failed (offline?):", err?.message);
+      } finally {
+        running = false;
       }
     };
-    const interval = setInterval(tick, SYNC_INTERVAL_MS);
+    const onFocus = () => {
+      if (Date.now() - lastRunAt >= CLOUD_SYNC_FOCUS_MIN_MS) tick();
+    };
+    const interval = setInterval(tick, CLOUD_SYNC_INTERVAL_MS);
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
     };
   }, [user?.id, loading, refreshGames]);
 

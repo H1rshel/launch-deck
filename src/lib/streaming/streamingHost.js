@@ -134,6 +134,12 @@ function trackStreamedSession(game, userId) {
 export function createHostHandlers({ userId, notify = () => {} }) {
   return {
     /**
+     * A Remote opened and may be about to send work. Nothing to do: receiving
+     * any command already switches the listener to its tight sweep.
+     */
+    remote_hello: async () => ({}),
+
+    /**
      * Client started `moonlight pair <us>` with a PIN and needs it submitted
      * to Sunshine. Retry: the PIN can arrive before Moonlight's pair request
      * registers with Sunshine.

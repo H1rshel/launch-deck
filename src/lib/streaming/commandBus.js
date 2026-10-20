@@ -19,7 +19,33 @@ const LISTENER_POLL_MS = 5000
 // SUBSCRIBED but silently drops a notification, the sweep still claims the
 // command in time.
 const LISTENER_IDLE_POLL_MS = 20000
+// With no Realtime channel and no recent command, nothing is talking to this
+// PC. Measured 2026-10-21 the 20s sweep was ~70% of every request the app
+// made, and on this project's Nano instance each request pages swapped-out
+// Supabase services back in from disk: closing the app halved the server's
+// disk reads. A Remote announces itself with `remote_hello` when it opens,
+// which flips the listener to ACTIVE before the user taps anything.
+const LISTENER_DORMANT_POLL_MS = 60000
+// After any command arrives the sweep stays tight for this long, so the rest
+// of a pairing/streaming session is as responsive as it always was.
+const LISTENER_ACTIVE_WINDOW_MS = 15 * 60 * 1000
 const COMMAND_MAX_AGE_MS = 5 * 60 * 1000
+
+/**
+ * Fire-and-forget: queue a command without waiting for (or watching) the
+ * result. sendCommand opens a Realtime channel and polls every 1.5s until the
+ * target answers — far too much machinery for a notification.
+ */
+export async function postCommand(userId, fromDeviceId, targetDeviceId, type, payload = {}) {
+  const { error } = await supabase.from('device_commands').insert({
+    user_id: userId,
+    target_device_id: targetDeviceId,
+    from_device_id: fromDeviceId,
+    type,
+    payload,
+  })
+  if (error) throw new Error(`Could not reach the host: ${error.message}`)
+}
 
 /**
  * Send a command to another device and wait for its result.
@@ -125,12 +151,14 @@ export async function sendCommand(
 export function startCommandListener(userId, deviceId, handlers, { realtime = true } = {}) {
   const processed = new Set()
   let stopped = false
+  let lastCommandAt = 0
 
   const processCommand = async (command) => {
     if (stopped || !command || processed.has(command.id)) return
     if (command.status !== 'pending') return
     if (Date.now() - new Date(command.created_at).getTime() > COMMAND_MAX_AGE_MS) return
     processed.add(command.id)
+    lastCommandAt = Date.now()
 
     // Claim the row — if another racer (or a timeout) got there first, skip.
     const { data: claimed } = await supabase
@@ -217,16 +245,22 @@ export function startCommandListener(userId, deviceId, handlers, { realtime = tr
 
   // Startup sweep (commands that arrived while offline) + poll fallback whose
   // cadence follows the health of the Realtime channel above.
+  const sweepDelay = () => {
+    // A healthy channel delivers commands itself; the sweep only backs it up.
+    if (realtime) return realtimeHealthy ? LISTENER_IDLE_POLL_MS : LISTENER_POLL_MS
+    // Mid-session (a command arrived recently): sweeping IS the delivery path.
+    if (Date.now() - lastCommandAt < LISTENER_ACTIVE_WINDOW_MS) return LISTENER_POLL_MS
+    // No peer PC and no Remote has said hello: nobody is sending anything.
+    return LISTENER_DORMANT_POLL_MS
+  }
+
   let pollTimer = null
   const scheduleSweep = () => {
     if (stopped) return
     pollTimer = setTimeout(async () => {
       await sweep()
       scheduleSweep()
-      // With Realtime deliberately off there is nothing to be a fallback FOR,
-      // and no second device to send anything, so sweep at the slow cadence
-      // rather than the tight one meant for a broken channel.
-    }, realtimeHealthy || !realtime ? LISTENER_IDLE_POLL_MS : LISTENER_POLL_MS)
+    }, sweepDelay())
   }
   sweep()
   scheduleSweep()
