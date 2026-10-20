@@ -25,7 +25,14 @@ const isTauri =
   typeof window !== 'undefined' &&
   !!(window.__TAURI_INTERNALS__ || window.__TAURI__)
 
-const SOURCES_REFRESH_MS = 60 * 1000
+// Matches the device heartbeat (devices.js): presence only changes once per
+// beat, so polling it every minute re-read the same rows four times out of five.
+const SOURCES_REFRESH_MS = 5 * 60 * 1000
+
+// Floor between refreshes from any trigger. On 2026-10-20 this refresh ran
+// ~870 times in 18 minutes against a Supabase instance that was already
+// swapping, and every request pages the database stack back in from disk.
+const SOURCES_MIN_GAP_MS = 15 * 1000
 
 const StreamingContext = createContext(null)
 
@@ -51,11 +58,17 @@ export function StreamingProvider({ children }) {
   // long-dead registration used to hold the channel open forever.
   const [hasPeer, setHasPeer] = useState(false)
 
-  const refreshStreamSources = useCallback(async () => {
+  const lastRefreshRef = useRef(0)
+
+  const refreshStreamSources = useCallback(async ({ force = false } = {}) => {
     if (!user?.id) {
       setSourceMap((prev) => (prev.size === 0 ? prev : new Map()))
       return
     }
+    const now = Date.now()
+    if (!force && now - lastRefreshRef.current < SOURCES_MIN_GAP_MS) return
+    lastRefreshRef.current = now
+
     const devices = await getUserDevices(user.id)
     const thisDeviceId = await getDeviceId()
     setHasPeer(hasLivePeer(devices, thisDeviceId))
@@ -63,7 +76,7 @@ export function StreamingProvider({ children }) {
     // device list on a timer.
     pruneStaleDevices(user.id, devices, thisDeviceId)
 
-    const map = await getStreamSourceMap(user.id)
+    const map = await getStreamSourceMap(user.id, devices)
     // Keep the previous Map identity when nothing changed — GameCard is
     // memoized, and a fresh map every refresh would re-render the whole
     // library every 60s.
@@ -89,8 +102,8 @@ export function StreamingProvider({ children }) {
 
   useEffect(() => {
     if (!user?.id) return undefined
-    refreshStreamSources()
-    const timer = setInterval(refreshStreamSources, SOURCES_REFRESH_MS)
+    refreshStreamSources({ force: true })
+    const timer = setInterval(() => refreshStreamSources(), SOURCES_REFRESH_MS)
     const onFocus = () => refreshStreamSources()
     window.addEventListener('focus', onFocus)
     return () => {
@@ -176,7 +189,7 @@ export function StreamingProvider({ children }) {
       } finally {
         streamingRef.current = false
         setStreamingSession(null)
-        refreshStreamSources()
+        refreshStreamSources({ force: true })
       }
     },
     [getStreamSource, user?.id, addNotification, refreshStreamSources],

@@ -112,7 +112,8 @@ export default function MobileApp() {
   const refresh = useCallback(async () => {
     if (!user?.id) return
     try {
-      const [{ data: rows }, { data: meta }, map, deviceList] = await Promise.all([
+      const deviceList = await getUserDevices(user.id)
+      const [{ data: rows }, { data: meta }, map] = await Promise.all([
         supabase
           .from('games')
           .select('game_id, title, normalized_title, cover_url, hero_url, hero_position, genres, favorite, added_at')
@@ -123,8 +124,7 @@ export default function MobileApp() {
           .from('user_game_metadata')
           .select('game_id, payload')
           .eq('user_id', user.id),
-        getStreamSourceMap(user.id),
-        getUserDevices(user.id),
+        getStreamSourceMap(user.id, deviceList),
       ])
       setGames(rows || [])
       setSourceMap(map)

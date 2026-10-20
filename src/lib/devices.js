@@ -391,21 +391,15 @@ export async function pushInstallMap(userId, { force = false } = {}) {
  * whose values are online, provisioned host devices (excluding this PC)
  * that have the game installed.
  */
-export async function getStreamSourceMap(userId) {
+export async function getStreamSourceMap(userId, knownDevices = null) {
   const empty = new Map()
   if (!userId) return empty
 
   try {
     const deviceId = await getDeviceId()
-    const [devices, { data: installs, error }] = await Promise.all([
-      getUserDevices(userId),
-      supabase
-        .from('device_game_installs')
-        .select('device_id, game_id, installed')
-        .eq('user_id', userId)
-        .eq('installed', true),
-    ])
-    if (error) throw error
+    // Callers that already hold the device list pass it in — fetching it again
+    // here doubled the user_devices reads on every refresh.
+    const devices = knownDevices ?? (await getUserDevices(userId))
 
     const hostById = new Map()
     for (const d of devices) {
@@ -418,7 +412,17 @@ export async function getStreamSourceMap(userId) {
         hostById.set(d.device_id, d)
       }
     }
+    // Decided from the device list alone, before touching the installs table:
+    // with no other PC online and hosting (every single-PC account, all day)
+    // the map is necessarily empty and that query was pure cost.
     if (hostById.size === 0) return empty
+
+    const { data: installs, error } = await supabase
+      .from('device_game_installs')
+      .select('device_id, game_id, installed')
+      .eq('user_id', userId)
+      .eq('installed', true)
+    if (error) throw error
 
     const map = new Map()
     for (const row of installs || []) {
